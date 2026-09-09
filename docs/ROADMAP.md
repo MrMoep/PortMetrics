@@ -2,6 +2,14 @@
 
 > Tracking: [GitHub Issues](https://github.com/MrMoep/PortMetrics/issues). Release-Historie: [CHANGELOG.md](../CHANGELOG.md).
 
+## v0.2.0 (released)
+
+| Issue | Beschreibung | Stand |
+|-------|--------------|-------|
+| [#29](https://github.com/MrMoep/PortMetrics/issues/29) | Settings: Paperless Field-Mapping UI | ✅ |
+| [#30](https://github.com/MrMoep/PortMetrics/issues/30) | Paperless Auto-Ingest (Webhook/Scheduler) | ✅ |
+| — | CORS_ORIGINS für Reverse Proxy | ✅ |
+
 ## v0.1.0 (released)
 
 Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
@@ -21,12 +29,10 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 | [#15](https://github.com/MrMoep/PortMetrics/issues/15) | Single Container + Scaffolding | ✅ |
 | [#6](https://github.com/MrMoep/PortMetrics/issues/6) | PostgreSQL Schema + Migrationen | ✅ |
 
-## Future / nach 0.1
+## Future / nach 0.2
 
 | Issue | Beschreibung | Priorität |
 |-------|--------------|-----------|
-| [#29](https://github.com/MrMoep/PortMetrics/issues/29) | Settings: Paperless Field-Mapping UI | P1 ✅ |
-| [#30](https://github.com/MrMoep/PortMetrics/issues/30) | Paperless Auto-Ingest (Webhook/Scheduler) | P1 |
 | [#7](https://github.com/MrMoep/PortMetrics/issues/7) | IRR / Geldgewichtete Rendite | P2 |
 | [#8](https://github.com/MrMoep/PortMetrics/issues/8) | Steuer-Freibetrag Tracker | P2 |
 | [#9](https://github.com/MrMoep/PortMetrics/issues/9) | Drawdown / Volatilität | P2 |

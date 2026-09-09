@@ -13,7 +13,7 @@ type Tab = "overview" | "lots" | "positions" | "simulator" | "staging" | "settin
 
 const FALLBACK_VERSION: VersionInfo = {
   name: "PortMetrics",
-  version: "0.1.0",
+  version: "0.2.0",
   repository: "https://github.com/MrMoep/PortMetrics",
 };
 

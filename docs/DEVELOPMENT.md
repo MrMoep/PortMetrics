@@ -96,7 +96,7 @@ Produktiv: dieselbe Migration gegen `portmetrics` (`APP_ENV=production`).
 
 - `ghcr.io/mrmoep/portmetrics:latest`
 - `ghcr.io/mrmoep/portmetrics:<git-sha>`
-- `ghcr.io/mrmoep/portmetrics:0.1.0` — bei Tag `v0.1.0`
+- `ghcr.io/mrmoep/portmetrics:0.2.0` — bei Tag `v0.2.0`
 
 ## Versionierung
 

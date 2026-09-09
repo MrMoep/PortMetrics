@@ -1,6 +1,6 @@
 # PortMetrics
 
-**Version 0.1.0** · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/MrMoep/PortMetrics)
+**Version 0.2.0** · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/MrMoep/PortMetrics)
 
 Self-hosted Portfolio-Analytics für Homelab-Umgebungen. PortMetrics erweitert [Ghostfolio](https://ghostfol.io) um FIFO-Lot-Tracking, Perioden-Renditen und steuerrelevante Auswertungen — mit optionaler Anbindung an [Paperless NGX](https://docs.paperless-ngx.com/) für Wertpapierbelege.
 
@@ -37,7 +37,7 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | PostgreSQL-Schema, FIFO |
 | [docs/API.md](docs/API.md) | REST-Endpunkte |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Unraid / Docker / Image-Tags |
-| [docs/PAPERLESS.md](docs/PAPERLESS.md) | Custom Fields & Staging-Workflow |
+| [docs/PAPERLESS.md](docs/PAPERLESS.md) | Custom Fields, Mapping, Webhook |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Branches, lokal testen, CI |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phasen & Future |
 
@@ -56,7 +56,7 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/mrmoep/portmetrics:0.1.0
+    image: ghcr.io/mrmoep/portmetrics:0.2.0
     ports:
       - "8080:8080"
     env_file: .env
@@ -84,18 +84,15 @@ Branches & CI: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 feature/* → PR → dev → PR → main → Image (GHCR) + Release-Tags
 ```
 
-## Status (0.1.0)
+## Status (0.2.0)
 
 | Phase | Fokus | Stand |
 |-------|-------|-------|
-| 0 | Ghostfolio → PostgreSQL Sync | ✅ |
-| 1 | FIFO Engine + Verkaufs-Simulator | ✅ |
-| 2 | Perioden-Metriken | ✅ |
-| 3 | Paperless-Integration | ✅ |
-| 4 | Dashboard v1 | ✅ |
+| 0–4 | Ghostfolio Sync, FIFO, Metriken, Paperless Staging, Dashboard | ✅ (0.1.0) |
+| 0.2 | Field-Mapping UI, Webhook-Ingest, CORS | ✅ |
 | Future | IRR, Freibetrag, Drawdown, … | offen (#7–#14) |
 
-Im Dashboard erscheint **v0.1.0** unter dem Titel; Klick öffnet das GitHub-Repo.
+Im Dashboard erscheint **v0.2.0** unter dem Titel; Klick öffnet das GitHub-Repo.
 
 ## Hinweis
 

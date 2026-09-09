@@ -1,6 +1,6 @@
 # Datenmodell
 
-PostgreSQL-Schema: `portmetrics` (Stand Release **0.1.0**).
+PostgreSQL-Schema: `portmetrics` (Stand Release **0.2.0**).
 
 Migrationen: `api/alembic/versions/` — lokal/Prod mit `alembic upgrade head`.
 

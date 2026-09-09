@@ -1,4 +1,4 @@
-# API-Übersicht (v0.1.0)
+# API-Übersicht (v0.2.0)
 
 Basis-URL im Container: `http://host:8080`
 
