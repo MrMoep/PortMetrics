@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from datetime import date
 from decimal import Decimal
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -13,6 +14,16 @@ from portmetrics.db.session import get_session_factory
 from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import list_open_lots, rebuild_lots, simulate_sell
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
+from portmetrics.metrics.periods import (
+    cagr,
+    compute_standard_periods,
+    load_activities,
+    nav_series,
+    overview_payload,
+    position_simple_return,
+    price_map,
+    rebuild_metrics_daily,
+)
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
 
 app = FastAPI(title="PortMetrics", version="0.1.0")
@@ -123,3 +134,56 @@ def post_simulate_sell(payload: dict, db: Session = Depends(get_db)) -> dict:
         )
     except FifoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/metrics/overview")
+def metrics_overview(db: Session = Depends(get_db)) -> dict:
+    return overview_payload(db)
+
+
+@app.get("/api/metrics/periods")
+def metrics_periods(db: Session = Depends(get_db)) -> dict:
+    activities = load_activities(db)
+    prices = price_map(db)
+    periods = compute_standard_periods(activities, prices)
+    return {
+        "periods": [
+            {
+                "label": p.label,
+                "start_date": p.start_date.isoformat(),
+                "end_date": p.end_date.isoformat(),
+                "start_nav": str(p.start_nav),
+                "end_nav": str(p.end_nav),
+                "contributions": str(p.contributions),
+                "withdrawals": str(p.withdrawals),
+                "period_return": str(p.period_return) if p.period_return is not None else None,
+            }
+            for p in periods
+        ],
+        "cagr": cagr(activities, prices),
+    }
+
+
+@app.get("/api/metrics/nav")
+def metrics_nav(
+    start: str | None = None,
+    end: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    activities = load_activities(db)
+    prices = price_map(db)
+    start_d = date.fromisoformat(start) if start else None
+    end_d = date.fromisoformat(end) if end else None
+    series = nav_series(activities, prices, start=start_d, end=end_d)
+    return {"count": len(series), "points": series}
+
+
+@app.get("/api/positions")
+def positions(isin: str | None = None, db: Session = Depends(get_db)) -> dict:
+    return {"positions": position_simple_return(db, asset_key=isin)}
+
+
+@app.post("/api/metrics/rebuild")
+def metrics_rebuild(db: Session = Depends(get_db)) -> dict:
+    count = rebuild_metrics_daily(db)
+    return {"days_written": count}
