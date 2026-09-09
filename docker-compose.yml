@@ -1,0 +1,13 @@
+# Lokale Entwicklung / optionaler Container-Test.
+# Kein Registry-Push — Image-Build für Prod läuft nur auf main via GitHub Actions.
+
+services:
+  portmetrics:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

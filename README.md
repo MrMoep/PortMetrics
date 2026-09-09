@@ -31,15 +31,34 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
-## Tech-Stack (geplant)
+## Tech-Stack
 
 | Schicht | Technologie |
 |---------|-------------|
-| Datenbank | PostgreSQL 18 (Schema `portmetrics`, extern) |
+| Datenbank | PostgreSQL 18 (`portmetrics` / `portmetrics_test`, extern) |
 | App | Python 3.12, FastAPI (API + SPA + Hintergrund-Jobs) |
 | FIFO Engine | Python (deterministisch, unit-testbar) |
-| Frontend | React, Vite, TanStack Table (aus demselben Container) |
-| Deployment | **Ein** Docker-Container auf Unraid |
+| Frontend | React, Vite, TanStack Table (Phase 4; Single Container) |
+| Deployment | **Ein** Docker-Image (`ghcr.io/…/portmetrics`), gebaut auf `main` |
+
+## Branches & CI
+
+```
+feature/* → PR → dev → PR → main
+                 Tests        Tests + Image-Build
+```
+
+Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+
+Lokal (ohne Image-Build):
+
+```powershell
+cd api
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+pytest
+```
 
 ## Roadmap
 
@@ -56,7 +75,7 @@ Die Umsetzung ist in Phasen gegliedert — siehe [GitHub Issues](https://github.
 
 ## Status
 
-**Frühe Planungsphase** — Repository und Dokumentation. Implementierung folgt phasenweise.
+Scaffold + CI/CD-Workflows. Fachliche Phasen folgen über Feature-PRs nach `dev`.
 
 ## Lizenz
 
