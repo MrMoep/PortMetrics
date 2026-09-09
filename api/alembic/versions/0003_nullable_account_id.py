@@ -1,6 +1,6 @@
 """Allow nullable activities.account_id (Ghostfolio accountId optional).
 
-Revision ID: 0003_nullable_activity_account_id
+Revision ID: 0003_nullable_account_id
 Revises: 0002_app_settings
 Create Date: 2026-09-09
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0003_nullable_activity_account_id"
+revision = "0003_nullable_account_id"
 down_revision = "0002_app_settings"
 branch_labels = None
 depends_on = None
