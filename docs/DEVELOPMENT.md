@@ -79,7 +79,7 @@ Pytest nutzt bevorzugt `TEST_DATABASE_URL`, sonst `DATABASE_URL`. So kann die Pr
 | Workflow | Trigger | Tut |
 |----------|---------|-----|
 | **CI** (`.github/workflows/ci.yml`) | PR nach `dev`/`main`, Push auf `dev` | Lint + Pytest (+ Coverage) |
-| **Release Image** (`.github/workflows/release-image.yml`) | Push auf `main` | Docker-Image → `ghcr.io/<owner>/portmetrics` |
+| **Release Image** (`.github/workflows/release-image.yml`) | Push auf `main`/`dev`, Tags `v*` | Docker-Image → GHCR |
 
 ## Datenbank-Migrationen
 
@@ -92,15 +92,17 @@ alembic upgrade head
 
 Produktiv: dieselbe Migration gegen `portmetrics` (`APP_ENV=production`).
 
-## Image-Tags (nach Merge auf `main`)
+## Image-Tags
 
-- `ghcr.io/mrmoep/portmetrics:latest`
-- `ghcr.io/mrmoep/portmetrics:<git-sha>`
+- `ghcr.io/mrmoep/portmetrics:latest` — Push auf `main`
+- `ghcr.io/mrmoep/portmetrics:dev` — Push auf `dev` (Test-Image; UI zeigt `0.2.0-dev · <Build-Zeit>`)
+- `ghcr.io/mrmoep/portmetrics:<git-sha>` — jeder Image-Build
 - `ghcr.io/mrmoep/portmetrics:0.2.0` — bei Tag `v0.2.0`
 
 ## Versionierung
 
-- Python: `api/src/portmetrics/__init__.py` → `__version__` (auch FastAPI/`/api/version`)
+- Package-Semver: `api/src/portmetrics/__init__.py` → `__version__`
+- Anzeige (`/api/version`): `display_version()` — bei Channel `dev` inkl. Build-Zeit (Europe/Berlin, Image-Build)
 - Frontend-Package: `web/package.json`
 - Release: Git-Tag `vMAJOR.MINOR.PATCH` + GitHub Release; Image-Tag folgt dem Workflow
 

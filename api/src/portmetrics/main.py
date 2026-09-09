@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from portmetrics import __version__
+from portmetrics.build_info import built_at, display_version, git_sha, image_channel
 from portmetrics.config import settings, webhook_secret_matches
 from portmetrics.db.models import Activity, SyncState
 from portmetrics.db.session import get_session_factory
@@ -88,7 +89,7 @@ def get_db() -> Generator[Session]:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "env": settings.app_env, "version": __version__}
+    return {"status": "ok", "env": settings.app_env, "version": display_version()}
 
 
 @app.get("/api/health")
@@ -98,11 +99,23 @@ def api_health() -> dict[str, str]:
 
 @app.get("/api/version")
 def api_version() -> dict[str, str]:
-    return {
+    payload = {
         "name": "PortMetrics",
-        "version": __version__,
+        "version": display_version(),
         "repository": "https://github.com/MrMoep/PortMetrics",
     }
+    channel = image_channel()
+    if channel:
+        payload["channel"] = channel
+    stamp = built_at()
+    if stamp:
+        payload["built_at"] = stamp
+    sha = git_sha()
+    if sha:
+        payload["git_sha"] = sha
+    # Keep package semver available for tooling; UI uses `version`.
+    payload["package_version"] = __version__
+    return payload
 
 
 @app.get("/api/sync/status")
