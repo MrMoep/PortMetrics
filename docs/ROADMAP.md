@@ -25,6 +25,8 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 
 | Issue | Beschreibung | Priorität |
 |-------|--------------|-----------|
+| [#29](https://github.com/MrMoep/PortMetrics/issues/29) | Settings: Paperless Field-Mapping UI | P1 |
+| [#30](https://github.com/MrMoep/PortMetrics/issues/30) | Paperless Auto-Ingest (Webhook/Scheduler) | P1 |
 | [#7](https://github.com/MrMoep/PortMetrics/issues/7) | IRR / Geldgewichtete Rendite | P2 |
 | [#8](https://github.com/MrMoep/PortMetrics/issues/8) | Steuer-Freibetrag Tracker | P2 |
 | [#9](https://github.com/MrMoep/PortMetrics/issues/9) | Drawdown / Volatilität | P2 |

@@ -21,5 +21,9 @@ Basis-URL im Container: `http://host:8080`
 | `POST` | `/api/staging/sync` | Paperless → Staging |
 | `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio |
 | `POST` | `/api/staging/{id}/reject` | Staging ablehnen |
+| `GET` | `/api/settings/paperless` | Paperless-Mapping / Tag / GF-Defaults |
+| `PUT` | `/api/settings/paperless` | Settings speichern |
+| `GET` | `/api/settings/paperless/custom-fields` | Custom Fields aus Paperless |
+| `POST` | `/api/settings/paperless/test` | Paperless-Verbindungstest |
 
 OpenAPI: `/docs` (FastAPI Swagger), wenn nicht abgeschaltet.
