@@ -32,6 +32,11 @@ from portmetrics.metrics.periods import (
     rebuild_metrics_daily,
 )
 from portmetrics.paperless.client import PaperlessClient, PaperlessError
+from portmetrics.paperless.mapping import (
+    FIELD_ROLES,
+    get_paperless_settings,
+    save_paperless_settings,
+)
 from portmetrics.paperless.staging import (
     confirm_staging,
     list_staging,
@@ -265,13 +270,77 @@ def staging_list(status: str | None = None, db: Session = Depends(get_db)) -> di
 def staging_sync(db: Session = Depends(get_db)) -> dict:
     client = _paperless_client()
     try:
-        result = sync_paperless_documents(db, client, tag=settings.paperless_tag)
+        result = sync_paperless_documents(db, client)
     except PaperlessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "scanned": result.scanned,
         "upserted": result.upserted,
         "skipped": result.skipped,
+    }
+
+
+@app.get("/api/settings/paperless")
+def settings_paperless_get(db: Session = Depends(get_db)) -> dict:
+    cfg = get_paperless_settings(db)
+    return {
+        "roles": list(FIELD_ROLES),
+        "field_map": cfg["field_map"],
+        "tag": cfg["tag"],
+        "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
+        "ghostfolio_data_source": cfg["ghostfolio_data_source"],
+        "paperless_configured": bool(settings.paperless_url and settings.paperless_token),
+    }
+
+
+@app.put("/api/settings/paperless")
+def settings_paperless_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        cfg = save_paperless_settings(db, payload)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "roles": list(FIELD_ROLES),
+        "field_map": cfg["field_map"],
+        "tag": cfg["tag"],
+        "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
+        "ghostfolio_data_source": cfg["ghostfolio_data_source"],
+        "paperless_configured": bool(settings.paperless_url and settings.paperless_token),
+    }
+
+
+@app.get("/api/settings/paperless/custom-fields")
+def settings_paperless_custom_fields() -> dict:
+    client = _paperless_client()
+    try:
+        fields = client.list_custom_fields()
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "count": len(fields),
+        "fields": [
+            {
+                "id": int(item["id"]),
+                "name": item.get("name"),
+                "data_type": item.get("data_type"),
+            }
+            for item in fields
+            if item.get("id") is not None
+        ],
+    }
+
+
+@app.post("/api/settings/paperless/test")
+def settings_paperless_test() -> dict:
+    client = _paperless_client()
+    try:
+        fields = client.list_custom_fields()
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "custom_field_count": len(fields),
+        "url": settings.paperless_url,
     }
 
 

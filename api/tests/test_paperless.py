@@ -9,6 +9,12 @@ from sqlalchemy import select
 from portmetrics.db.models import DocumentLink, StagingImport
 from portmetrics.ghostfolio.client import GhostfolioClient
 from portmetrics.paperless.client import PaperlessClient, extract_custom_fields
+from portmetrics.paperless.mapping import (
+    extract_fields_by_roles,
+    get_paperless_settings,
+    resolve_role_field_map,
+    save_paperless_settings,
+)
 from portmetrics.paperless.staging import (
     STATUS_IMPORTED,
     STATUS_PENDING,
@@ -32,6 +38,19 @@ FIELD_MAP = {
     "gf_activity_id": 10,
 }
 
+ROLE_MAP = {
+    "type": 1,
+    "isin": 2,
+    "symbol": 3,
+    "quantity": 4,
+    "unit_price": 5,
+    "fee": 6,
+    "trade_date": 7,
+    "currency": 8,
+    "import_status": 9,
+    "activity_id": 10,
+}
+
 
 def _doc(doc_id: int = 42) -> dict:
     return {
@@ -51,13 +70,28 @@ def _doc(doc_id: int = 42) -> dict:
     }
 
 
+def _fields_handler(request: httpx.Request) -> httpx.Response | None:
+    if request.url.path.endswith("/custom_fields/"):
+        return httpx.Response(
+            200,
+            json={"results": [{"id": fid, "name": name} for name, fid in FIELD_MAP.items()]},
+        )
+    return None
+
+
 def test_extract_custom_fields() -> None:
     fields = extract_custom_fields(_doc(), FIELD_MAP)
     assert fields["isin"] == "IE00BK5BQT80"
     assert fields["stueckzahl"] == "10"
 
 
-def test_build_staging_payload() -> None:
+def test_extract_fields_by_roles() -> None:
+    fields = extract_fields_by_roles(_doc(), ROLE_MAP)
+    assert fields["isin"] == "IE00BK5BQT80"
+    assert fields["quantity"] == "10"
+
+
+def test_build_staging_payload_legacy_names() -> None:
     payload = build_staging_payload(_doc(), extract_custom_fields(_doc(), FIELD_MAP))
     assert payload["symbol"] == "VWCE.DE"
     assert payload["wp_typ"] == "BUY"
@@ -65,18 +99,18 @@ def test_build_staging_payload() -> None:
     assert payload["quantity"] == "10"
 
 
+def test_build_staging_payload_roles() -> None:
+    payload = build_staging_payload(_doc(), extract_fields_by_roles(_doc(), ROLE_MAP))
+    assert payload["symbol"] == "VWCE.DE"
+    assert payload["quantity"] == "10"
+
+
 def test_paperless_list_documents_and_fields() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "Token secret"
-        if request.url.path.endswith("/custom_fields/"):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": fid, "name": name} for name, fid in FIELD_MAP.items()
-                    ]
-                },
-            )
+        handled = _fields_handler(request)
+        if handled:
+            return handled
         if request.url.path.endswith("/documents/"):
             return httpx.Response(200, json={"results": [_doc()]})
         raise AssertionError(request.url.path)
@@ -87,17 +121,11 @@ def test_paperless_list_documents_and_fields() -> None:
     assert len(client.list_documents()) == 1
 
 
-def test_sync_paperless_documents_idempotent(db_session) -> None:
+def test_sync_uses_legacy_name_fallback(db_session) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/custom_fields/"):
-            return httpx.Response(
-                200,
-                json={
-                    "results": [
-                        {"id": fid, "name": name} for name, fid in FIELD_MAP.items()
-                    ]
-                },
-            )
+        handled = _fields_handler(request)
+        if handled:
+            return handled
         if request.url.path.endswith("/documents/"):
             return httpx.Response(200, json={"results": [_doc(), _doc(43)]})
         raise AssertionError(request.url.path)
@@ -113,13 +141,88 @@ def test_sync_paperless_documents_idempotent(db_session) -> None:
     assert all(row.status == STATUS_PENDING for row in rows)
 
 
+def test_sync_uses_stored_role_mapping(db_session) -> None:
+    # Map roles to ids but use different Paperless names than legacy defaults.
+    save_paperless_settings(
+        db_session,
+        {
+            "field_map": ROLE_MAP,
+            "tag": None,
+        },
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/custom_fields/"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 1, "name": "TradeType"},
+                        {"id": 2, "name": "ISIN"},
+                        {"id": 3, "name": "Ticker"},
+                        {"id": 4, "name": "Qty"},
+                        {"id": 5, "name": "Price"},
+                        {"id": 6, "name": "Fee"},
+                        {"id": 7, "name": "TradeDate"},
+                        {"id": 8, "name": "CCY"},
+                        {"id": 9, "name": "ImportStatus"},
+                        {"id": 10, "name": "ActivityId"},
+                    ]
+                },
+            )
+        if request.url.path.endswith("/documents/"):
+            return httpx.Response(200, json={"results": [_doc(55)]})
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = sync_paperless_documents(db_session, client)
+    assert result.upserted == 1
+    row = db_session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == 55))
+    assert row is not None
+    assert row.payload["symbol"] == "VWCE.DE"
+
+
+def test_save_and_resolve_mapping(db_session) -> None:
+    saved = save_paperless_settings(
+        db_session,
+        {
+            "field_map": {"isin": 2, "quantity": 4, "unit_price": 5, "trade_date": 7},
+            "tag": "wertpapier",
+            "ghostfolio_default_account_id": "acc-9",
+            "ghostfolio_data_source": "MANUAL",
+        },
+    )
+    assert saved["tag"] == "wertpapier"
+    assert saved["field_map"]["isin"] == 2
+    assert get_paperless_settings(db_session)["ghostfolio_data_source"] == "MANUAL"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handled = _fields_handler(request)
+        if handled:
+            return handled
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    resolved = resolve_role_field_map(db_session, client)
+    assert resolved["isin"] == 2
+    assert resolved["quantity"] == 4
+
+
 def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
     monkeypatch.setattr(
-        "portmetrics.paperless.staging.settings.ghostfolio_default_account_id",
+        "portmetrics.paperless.mapping.settings.ghostfolio_default_account_id",
         "acc-1",
     )
     monkeypatch.setattr(
-        "portmetrics.paperless.staging.settings.ghostfolio_data_source",
+        "portmetrics.paperless.mapping.settings.ghostfolio_data_source",
         "YAHOO",
     )
 
