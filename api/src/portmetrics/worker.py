@@ -52,15 +52,6 @@ def cmd_rebuild_fifo() -> int:
     return 0
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="portmetrics-worker")
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("sync-ghostfolio", help="Pull Ghostfolio activities into PostgreSQL")
-    sub.add_parser("rebuild-fifo", help="Rebuild FIFO lots from activities")
-    sub.add_parser("rebuild-metrics", help="Rebuild daily portfolio metrics")
-    return parser.parse_args(argv)
-
-
 def cmd_rebuild_metrics() -> int:
     from portmetrics.metrics.periods import rebuild_metrics_daily
 
@@ -71,6 +62,38 @@ def cmd_rebuild_metrics() -> int:
     return 0
 
 
+def cmd_sync_paperless() -> int:
+    from portmetrics.paperless.client import PaperlessClient, PaperlessError
+    from portmetrics.paperless.staging import sync_paperless_documents
+
+    if not settings.paperless_url or not settings.paperless_token:
+        print("PAPERLESS_URL and PAPERLESS_TOKEN are required", file=sys.stderr)
+        return 2
+    engine = get_engine()
+    client = PaperlessClient(settings.paperless_url, settings.paperless_token)
+    try:
+        with session_scope(engine) as session:
+            result = sync_paperless_documents(session, client, tag=settings.paperless_tag)
+    except PaperlessError as exc:
+        print(f"paperless sync failed: {exc}", file=sys.stderr)
+        return 1
+    print(
+        f"synced paperless: scanned={result.scanned} "
+        f"upserted={result.upserted} skipped={result.skipped}"
+    )
+    return 0
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="portmetrics-worker")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("sync-ghostfolio", help="Pull Ghostfolio activities into PostgreSQL")
+    sub.add_parser("rebuild-fifo", help="Rebuild FIFO lots from activities")
+    sub.add_parser("rebuild-metrics", help="Rebuild daily portfolio metrics")
+    sub.add_parser("sync-paperless", help="Pull Paperless docs into staging_imports")
+    return parser.parse_args(argv)
+
+
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     if args.command == "sync-ghostfolio":
@@ -79,6 +102,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(cmd_rebuild_fifo())
     if args.command == "rebuild-metrics":
         raise SystemExit(cmd_rebuild_metrics())
+    if args.command == "sync-paperless":
+        raise SystemExit(cmd_sync_paperless())
     raise SystemExit(2)
 
 

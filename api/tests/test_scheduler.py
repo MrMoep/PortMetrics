@@ -21,7 +21,7 @@ def test_build_scheduler_registers_jobs() -> None:
 def test_job_sync_skips_without_config(monkeypatch, caplog) -> None:
     monkeypatch.setattr("portmetrics.scheduler.settings.ghostfolio_url", None)
     monkeypatch.setattr("portmetrics.scheduler.settings.ghostfolio_access_token", None)
-    with caplog.at_level("DEBUG"):
+    with caplog.at_level("DEBUG", logger="portmetrics.scheduler"):
         job_sync_and_rebuild()
     assert "Skipping scheduled sync" in caplog.text
 

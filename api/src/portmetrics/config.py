@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     metrics_interval_minutes: int = 60
     ghostfolio_default_account_id: str | None = None
     ghostfolio_data_source: str = "YAHOO"
+    paperless_tag: str | None = None  # optional: only sync docs with this tag name
 
     @property
     def effective_database_url(self) -> str:

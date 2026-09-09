@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, Lot, Overview } from "./api";
+import { api, Lot, Overview, StagingItem } from "./api";
 
-type Tab = "overview" | "lots" | "positions" | "simulator";
+type Tab = "overview" | "lots" | "positions" | "simulator" | "staging";
 
 function pct(value: string | null | undefined): string {
   if (value == null) return "—";
@@ -21,6 +21,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [lots, setLots] = useState<Lot[]>([]);
+  const [staging, setStaging] = useState<StagingItem[]>([]);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null);
@@ -28,9 +29,14 @@ export default function App() {
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [ov, lotData] = await Promise.all([api.overview(), api.lots()]);
+      const [ov, lotData, stagingData] = await Promise.all([
+        api.overview(),
+        api.lots(),
+        api.staging(),
+      ]);
       setOverview(ov);
       setLots(lotData.lots);
+      setStaging(stagingData.items);
       setStatus(`Stand ${ov.as_of}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -89,6 +95,9 @@ export default function App() {
           <button type="button" onClick={() => void runAction("Metrics", api.rebuildMetrics)}>
             Rebuild Metrics
           </button>
+          <button type="button" onClick={() => void runAction("Paperless", api.stagingSync)}>
+            Sync Paperless
+          </button>
           <button type="button" className="primary" onClick={() => void refresh()}>
             Aktualisieren
           </button>
@@ -101,6 +110,7 @@ export default function App() {
             ["overview", "Overview"],
             ["lots", "FIFO Lots"],
             ["positions", "Positionen"],
+            ["staging", "Staging"],
             ["simulator", "Simulator"],
           ] as const
         ).map(([id, label]) => (
@@ -224,6 +234,65 @@ export default function App() {
               ))}
             </tbody>
           </table>
+        </section>
+      )}
+
+      {tab === "staging" && (
+        <section className="panel">
+          <p className="muted">
+            Review-Queue aus Paperless. Confirm importiert nach Ghostfolio; danach Sync ausführen.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Doc</th>
+                <th>Status</th>
+                <th>Typ</th>
+                <th>Symbol</th>
+                <th>Menge</th>
+                <th>Kurs</th>
+                <th>Datum</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {staging.map((item) => (
+                <tr key={item.id}>
+                  <td className="mono">{item.id}</td>
+                  <td className="mono">{item.paperless_doc_id}</td>
+                  <td>{item.status}</td>
+                  <td>{item.payload.wp_typ ?? "—"}</td>
+                  <td className="mono">{item.payload.symbol ?? item.payload.isin ?? "—"}</td>
+                  <td className="mono">{item.payload.quantity ?? "—"}</td>
+                  <td className="mono">{money(item.payload.unit_price)}</td>
+                  <td className="mono">{item.payload.trade_date ?? "—"}</td>
+                  <td className="row-actions">
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={item.status === "imported"}
+                      onClick={() =>
+                        void runAction(`Confirm #${item.id}`, () => api.stagingConfirm(item.id))
+                      }
+                    >
+                      Confirm
+                    </button>
+                    <button
+                      type="button"
+                      disabled={item.status === "imported" || item.status === "rejected"}
+                      onClick={() =>
+                        void runAction(`Reject #${item.id}`, () => api.stagingReject(item.id))
+                      }
+                    >
+                      Reject
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {staging.length === 0 && <p className="muted">Keine Staging-Einträge.</p>}
         </section>
       )}
 

@@ -75,7 +75,7 @@ Die Umsetzung ist in Phasen gegliedert — siehe [GitHub Issues](https://github.
 
 ## Status
 
-Phasen 0–2 und 4 auf `dev` (Sync, FIFO, Metriken, Dashboard). Phase 3 (Paperless) folgt. Single-Container inkl. APScheduler-Jobs und Log-Volume.
+Phasen 0–4 auf `dev` (Sync, FIFO, Metriken, Dashboard, Paperless-Staging). Single-Container inkl. APScheduler und Log-Volume. Paperless: [docs/PAPERLESS.md](docs/PAPERLESS.md).
 
 ## Lizenz
 
