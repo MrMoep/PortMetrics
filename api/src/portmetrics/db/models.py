@@ -54,7 +54,7 @@ class Activity(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     gf_activity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True, nullable=False)
-    account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    account_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     isin: Mapped[str | None] = mapped_column(Text)
     symbol: Mapped[str] = mapped_column(Text, nullable=False)
     type: Mapped[str] = mapped_column(String(16), nullable=False)
