@@ -342,7 +342,17 @@ export default function App() {
               href={version.repository}
               target="_blank"
               rel="noreferrer"
-              title="GitHub Repository"
+              title={
+                version.built_at || version.git_sha
+                  ? [
+                      version.built_at ? `Build ${version.built_at}` : null,
+                      version.git_sha ? `git ${version.git_sha}` : null,
+                      "GitHub Repository",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : "GitHub Repository"
+              }
             >
               v{version.version}
             </a>

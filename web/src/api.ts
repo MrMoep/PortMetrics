@@ -55,6 +55,10 @@ export type VersionInfo = {
   name: string;
   version: string;
   repository: string;
+  channel?: string;
+  built_at?: string;
+  git_sha?: string;
+  package_version?: string;
 };
 
 export type PaperlessField = {

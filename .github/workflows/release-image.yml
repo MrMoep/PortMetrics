@@ -2,7 +2,7 @@ name: Release Image
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["v*"]
 
 permissions:
@@ -25,6 +25,16 @@ jobs:
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           echo "image=ghcr.io/${OWNER}/portmetrics" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            echo "channel=dev" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ] || [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "channel=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=" >> "$GITHUB_OUTPUT"
+          fi
+          # Europe/Berlin wall-clock so Unraid UI matches local time
+          echo "built_at=$(TZ=Europe/Berlin date +'%Y-%m-%d %H:%M')" >> "$GITHUB_OUTPUT"
+          echo "git_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -40,6 +50,7 @@ jobs:
           images: ${{ steps.meta.outputs.image }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/dev' }}
             type=sha,prefix=,format=short
             type=ref,event=tag
 
@@ -49,5 +60,9 @@ jobs:
           push: true
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            PORTMETRICS_CHANNEL=${{ steps.meta.outputs.channel }}
+            PORTMETRICS_BUILT_AT=${{ steps.meta.outputs.built_at }}
+            PORTMETRICS_GIT_SHA=${{ steps.meta.outputs.git_sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
