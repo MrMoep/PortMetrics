@@ -54,6 +54,30 @@ def job_rebuild_metrics() -> None:
         logger.exception("scheduled metrics rebuild failed")
 
 
+def job_sync_paperless() -> None:
+    if not settings.paperless_url or not settings.paperless_token:
+        logger.info("Skipping scheduled Paperless sync: not configured")
+        return
+    from portmetrics.paperless.client import PaperlessClient, PaperlessError
+    from portmetrics.paperless.staging import sync_paperless_documents
+
+    engine = get_engine()
+    client = PaperlessClient(settings.paperless_url, settings.paperless_token)
+    try:
+        with session_scope(engine) as session:
+            result = sync_paperless_documents(session, client)
+        logger.info(
+            "scheduled paperless sync ok: scanned=%s upserted=%s skipped=%s",
+            result.scanned,
+            result.upserted,
+            result.skipped,
+        )
+    except PaperlessError as exc:
+        logger.exception("scheduled paperless sync failed: %s", exc)
+    except Exception:
+        logger.exception("scheduled paperless sync failed unexpectedly")
+
+
 def build_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(
@@ -72,6 +96,17 @@ def build_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+    if settings.paperless_sync_interval_minutes > 0:
+        scheduler.add_job(
+            job_sync_paperless,
+            trigger=IntervalTrigger(
+                minutes=max(1, settings.paperless_sync_interval_minutes)
+            ),
+            id="sync_paperless",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     return scheduler
 
 
@@ -89,9 +124,10 @@ def start_scheduler() -> BackgroundScheduler | None:
     _scheduler = build_scheduler()
     _scheduler.start()
     logger.info(
-        "Background scheduler started (sync=%sm, metrics=%sm)",
+        "Background scheduler started (sync=%sm, metrics=%sm, paperless=%sm)",
         settings.sync_interval_minutes,
         settings.metrics_interval_minutes,
+        settings.paperless_sync_interval_minutes,
     )
     return _scheduler
 

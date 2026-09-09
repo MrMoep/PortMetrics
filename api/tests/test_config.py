@@ -39,3 +39,12 @@ def test_parse_cors_origins_splits_and_trims() -> None:
 def test_settings_cors_origin_list() -> None:
     s = Settings(cors_origins="https://portmetric.mrcarott.de")
     assert s.cors_origin_list == ["https://portmetric.mrcarott.de"]
+
+
+def test_webhook_secret_matches() -> None:
+    from portmetrics.config import webhook_secret_matches
+
+    assert webhook_secret_matches("abc", "abc") is True
+    assert webhook_secret_matches("abc", "abd") is False
+    assert webhook_secret_matches(None, "abc") is False
+    assert webhook_secret_matches("abc", None) is False
