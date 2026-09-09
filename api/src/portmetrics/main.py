@@ -48,6 +48,11 @@ from portmetrics.paperless.staging import (
 )
 from portmetrics.scheduler import start_scheduler, stop_scheduler
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
+from portmetrics.sync.prices import (
+    GHOSTFOLIO_PRICES_SOURCE,
+    price_snapshot_count,
+    sync_ghostfolio_prices,
+)
 
 
 @asynccontextmanager
@@ -121,13 +126,23 @@ def api_version() -> dict[str, str]:
 @app.get("/api/sync/status")
 def sync_status(db: Session = Depends(get_db)) -> dict:
     state = db.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_SOURCE))
+    price_state = db.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_PRICES_SOURCE))
     activity_count = db.scalar(select(func.count()).select_from(Activity)) or 0
     return {
         "source": GHOSTFOLIO_SOURCE,
         "activity_count": activity_count,
+        "price_snapshot_count": price_snapshot_count(db),
         "last_sync_at": state.last_sync_at.isoformat() if state and state.last_sync_at else None,
         "checksum": state.checksum if state else None,
         "meta": state.meta if state else None,
+        "prices": {
+            "last_sync_at": (
+                price_state.last_sync_at.isoformat()
+                if price_state and price_state.last_sync_at
+                else None
+            ),
+            "meta": price_state.meta if price_state else None,
+        },
     }
 
 
@@ -141,6 +156,12 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
     client = GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)
     try:
         result = sync_ghostfolio_activities(db, client)
+        prices = sync_ghostfolio_prices(
+            db,
+            client,
+            history_days=settings.ghostfolio_price_history_days,
+            default_data_source=settings.ghostfolio_data_source,
+        )
         fifo = rebuild_lots(db)
         metrics_days = rebuild_metrics_daily(db)
     except GhostfolioError as exc:
@@ -151,6 +172,9 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
         "fetched": result.fetched,
         "upserted": result.upserted,
         "checksum": result.checksum,
+        "price_assets": prices.assets,
+        "price_upserted": prices.upserted,
+        "price_skipped": prices.skipped,
         "lots_created": fifo.lots_created,
         "consumptions": fifo.consumptions,
         "metrics_days": metrics_days,
@@ -381,8 +405,7 @@ async def webhook_paperless(
         except Exception:
             payload = {}
     elif (
-        "application/x-www-form-urlencoded" in content_type
-        or "multipart/form-data" in content_type
+        "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type
     ):
         form = await request.form()
         payload = dict(form)

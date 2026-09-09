@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     metrics_interval_minutes: int = 60
     ghostfolio_default_account_id: str | None = None
     ghostfolio_data_source: str = "YAHOO"
+    # Days of daily history to pull per symbol (Ghostfolio includeHistoricalData)
+    ghostfolio_price_history_days: int = 2000
     paperless_tag: str | None = None  # optional: only sync docs with this tag name
     # Shared secret for POST /api/webhooks/paperless (header X-PortMetrics-Secret)
     paperless_webhook_secret: str | None = None

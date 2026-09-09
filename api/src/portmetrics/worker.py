@@ -11,6 +11,7 @@ from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import rebuild_lots
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.sync.activities import sync_ghostfolio_activities
+from portmetrics.sync.prices import sync_ghostfolio_prices
 
 
 def cmd_sync_ghostfolio() -> int:
@@ -22,6 +23,12 @@ def cmd_sync_ghostfolio() -> int:
     try:
         with session_scope(engine) as session:
             result = sync_ghostfolio_activities(session, client)
+            prices = sync_ghostfolio_prices(
+                session,
+                client,
+                history_days=settings.ghostfolio_price_history_days,
+                default_data_source=settings.ghostfolio_data_source,
+            )
             fifo = rebuild_lots(session)
     except GhostfolioError as exc:
         print(f"sync failed: {exc}", file=sys.stderr)
@@ -32,6 +39,7 @@ def cmd_sync_ghostfolio() -> int:
     print(
         f"synced ghostfolio activities: fetched={result.fetched} "
         f"upserted={result.upserted} checksum={result.checksum} "
+        f"prices={prices.upserted}/{prices.assets} "
         f"lots={fifo.lots_created} consumptions={fifo.consumptions}"
     )
     return 0
