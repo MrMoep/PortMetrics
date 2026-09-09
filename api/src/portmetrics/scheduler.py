@@ -77,8 +77,12 @@ def build_scheduler() -> BackgroundScheduler:
 
 def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
-    if not settings.scheduler_enabled:
-        logger.info("Background scheduler disabled (SCHEDULER_ENABLED=false)")
+    if settings.app_env == "test" or not settings.scheduler_enabled:
+        logger.info(
+            "Background scheduler disabled (env=%s, enabled=%s)",
+            settings.app_env,
+            settings.scheduler_enabled,
+        )
         return None
     if _scheduler is not None and _scheduler.running:
         return _scheduler
