@@ -35,8 +35,8 @@ jobs:
 
     env:
       APP_ENV: test
-      DATABASE_URL: postgresql://portmetrics:portmetrics@localhost:5432/portmetrics_test
-      TEST_DATABASE_URL: postgresql://portmetrics:portmetrics@localhost:5432/portmetrics_test
+      DATABASE_URL: postgresql+psycopg://portmetrics:portmetrics@localhost:5432/portmetrics_test
+      TEST_DATABASE_URL: postgresql+psycopg://portmetrics:portmetrics@localhost:5432/portmetrics_test
 
     steps:
       - uses: actions/checkout@v4
