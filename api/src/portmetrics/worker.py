@@ -57,7 +57,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("sync-ghostfolio", help="Pull Ghostfolio activities into PostgreSQL")
     sub.add_parser("rebuild-fifo", help="Rebuild FIFO lots from activities")
+    sub.add_parser("rebuild-metrics", help="Rebuild daily portfolio metrics")
     return parser.parse_args(argv)
+
+
+def cmd_rebuild_metrics() -> int:
+    from portmetrics.metrics.periods import rebuild_metrics_daily
+
+    engine = get_engine()
+    with session_scope(engine) as session:
+        count = rebuild_metrics_daily(session)
+    print(f"metrics rebuild: days_written={count}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -66,6 +77,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(cmd_sync_ghostfolio())
     if args.command == "rebuild-fifo":
         raise SystemExit(cmd_rebuild_fifo())
+    if args.command == "rebuild-metrics":
+        raise SystemExit(cmd_rebuild_metrics())
     raise SystemExit(2)
 
 
