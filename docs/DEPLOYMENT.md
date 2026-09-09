@@ -41,11 +41,14 @@ alembic upgrade head
 ```
 
 3. `.env` aus [`.env.example`](../.env.example) — mind. `DATABASE_URL`, optional Ghostfolio/Paperless.
+4. Optional Reverse Proxy (z. B. Nginx Proxy Manager): Host auf Container-Port `8080` zeigen.
+   Für Cross-Origin-Zugriff die Browser-Origin setzen, z. B.
+   `CORS_ORIGINS=https://portmetric.mrcarott.de` (mehrere Origins komma-getrennt).
 
 ## Erststart
 
 1. Container starten, `/health` prüfen (`version` sollte `0.1.0` sein)
-2. Dashboard öffnen (`http://host:8080/`)
+2. Dashboard öffnen (`http://host:8080/` oder die NPM-URL)
 3. **Sync Ghostfolio** → FIFO/Metrics laufen mit
 4. Optional Paperless: Custom Fields laut [PAPERLESS.md](PAPERLESS.md), dann **Sync Paperless**
 
