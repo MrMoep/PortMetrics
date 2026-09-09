@@ -6,30 +6,44 @@
 |------------|-------|
 | **Ghostfolio** | Kanonische Transaktionshistorie, Marktdaten, Portfolio-Übersicht |
 | **Paperless NGX** | Belegarchiv, Extraktion via Paperless GPT (Staging) |
-| **PostgreSQL** | Analytics Layer (Schema `portmetrics`) |
-| **PortMetrics API** | REST API für Dashboard und Webhooks |
-| **PortMetrics Worker** | Sync, FIFO-Rebuild, Metrics-Jobs |
-| **PortMetrics Web** | Custom Dashboard (React SPA) |
+| **PostgreSQL** | Analytics Layer (Schema `portmetrics`) — läuft **extern** |
+| **PortMetrics** | Ein Container: API + SPA + Hintergrund-Jobs |
 
 ## Datenfluss
 
 1. Wertpapier-PDF landet in Paperless → P-GPT extrahiert Felder (ISIN, Stückzahl, Kurs, Gebühr, …)
 2. Staging-Eintrag wird manuell oder halbautomatisch geprüft
 3. Nach Bestätigung: Import nach Ghostfolio via `POST /api/v1/import`
-4. Sync-Service zieht Activities und Kurse aus Ghostfolio nach PostgreSQL
+4. PortMetrics zieht Activities und Kurse aus Ghostfolio nach PostgreSQL
 5. FIFO-Engine berechnet Lots, Consumptions und Kennzahlen
 6. Dashboard liest aus PostgreSQL (und optional Ghostfolio für Allokation)
 
-## Docker Services (geplant)
+## Deployment: Single Container (v1)
+
+Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im gleichen Image:
+
+| Pfad / Prozess | Aufgabe |
+|----------------|---------|
+| `/` | React SPA (statisch ausgeliefert von FastAPI) |
+| `/api/...` | REST API |
+| `/health` | Health-Check |
+| Background (APScheduler o. Ä.) | Sync, FIFO-Rebuild, Metrics-Jobs |
 
 ```yaml
 services:
-  portmetrics-api:      # Port 8080 — REST API
-  portmetrics-worker:   # Hintergrund-Jobs (Sync, FIFO, Metrics)
-  portmetrics-web:      # Port 3000 — Dashboard SPA
+  portmetrics:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file: .env
+    # PostgreSQL bleibt extern (bestehende Unraid-Instanz)
 ```
 
-PostgreSQL läuft extern (bestehende Unraid-Instanz). Zugriff via `host.docker.internal` oder LAN-IP.
+Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP. Eigenes Schema/DB `portmetrics` — Ghostfolio-DB nicht teilen.
+
+### Warum nicht 3 Container?
+
+Die Trennung API / Worker / Web wäre sauber skalierbar, ist für einen Nutzer und überschaubares Portfolio unnötig. Später kann der Worker bei Bedarf ausgelagert werden; v1 bleibt bewusst einfach.
 
 ## Source of Truth
 
@@ -44,7 +58,7 @@ Paperless ist **nicht** das Ledger — Extraktionsfehler werden im Staging abgef
 
 ## Authentifizierung
 
-Finanzdaten nicht öffentlich exponieren. Empfohlen: Reverse Proxy (NPM/Traefik) mit Authentik oder Basic Auth vor `portmetrics-web` und `portmetrics-api`.
+Finanzdaten nicht öffentlich exponieren. Empfohlen: Reverse Proxy (NPM/Traefik) mit Authentik oder Basic Auth vor PortMetrics (Port 8080).
 
 ## Idempotenz
 

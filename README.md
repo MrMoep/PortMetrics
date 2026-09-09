@@ -35,11 +35,11 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 | Schicht | Technologie |
 |---------|-------------|
-| Datenbank | PostgreSQL 18 (Schema `portmetrics`) |
-| API + Worker | Python 3.12, FastAPI |
+| Datenbank | PostgreSQL 18 (Schema `portmetrics`, extern) |
+| App | Python 3.12, FastAPI (API + SPA + Hintergrund-Jobs) |
 | FIFO Engine | Python (deterministisch, unit-testbar) |
-| Frontend | React, Vite, TanStack Table |
-| Deployment | Docker Compose auf Unraid |
+| Frontend | React, Vite, TanStack Table (aus demselben Container) |
+| Deployment | **Ein** Docker-Container auf Unraid |
 
 ## Roadmap
 
