@@ -10,6 +10,11 @@ def test_parse_args_sync_command() -> None:
     assert args.command == "sync-ghostfolio"
 
 
+def test_parse_args_rebuild_fifo() -> None:
+    args = parse_args(["rebuild-fifo"])
+    assert args.command == "rebuild-fifo"
+
+
 def test_cmd_sync_requires_config(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("portmetrics.worker.settings.ghostfolio_url", None)
     monkeypatch.setattr("portmetrics.worker.settings.ghostfolio_access_token", None)
