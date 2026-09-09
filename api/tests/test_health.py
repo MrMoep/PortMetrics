@@ -66,3 +66,43 @@ def test_sync_status_empty(engine) -> None:
         assert body["last_sync_at"] is None
     finally:
         app.dependency_overrides.clear()
+
+
+def test_staging_sync_requires_config(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(paperless_url=None, paperless_token=None),
+    )
+
+    def override_db():
+        yield MagicMock()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post("/api/staging/sync")
+        assert response.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_staging_list_empty(engine) -> None:
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_db():
+        session = SessionLocal()
+        try:
+            yield session
+            session.commit()
+        finally:
+            session.close()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        client = TestClient(app)
+        response = client.get("/api/staging")
+        assert response.status_code == 200
+        assert response.json() == {"count": 0, "items": []}
+    finally:
+        app.dependency_overrides.clear()
