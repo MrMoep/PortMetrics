@@ -42,6 +42,10 @@ Optional mit Compose (baut lokal, publiziert nichts):
 docker compose up --build
 ```
 
+Logs liegen unter `/app/logs` (Compose-Volume `portmetrics_logs`; auf Unraid z. B. `/mnt/user/appdata/portmetrics/logs`).
+
+Hintergrund-Jobs (Sync → FIFO → Metrics) laufen im selben Prozess via APScheduler, gesteuert über `SCHEDULER_ENABLED`, `SYNC_INTERVAL_MINUTES`, `METRICS_INTERVAL_MINUTES`.
+
 ### Zwei Datenbanken (empfohlen)
 
 Auf deiner PostgreSQL-18-Instanz (Unraid):

@@ -13,7 +13,10 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    WEB_DIST_DIR=/app/web/dist
+    WEB_DIST_DIR=/app/web/dist \
+    LOG_DIR=/app/logs
+
+RUN mkdir -p /app/logs
 
 COPY api/pyproject.toml /app/api/pyproject.toml
 COPY api/src /app/api/src

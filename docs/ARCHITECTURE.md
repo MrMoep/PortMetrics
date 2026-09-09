@@ -27,7 +27,8 @@ Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im
 | `/` | React SPA (statisch ausgeliefert von FastAPI) |
 | `/api/...` | REST API |
 | `/health` | Health-Check |
-| Background (APScheduler o. Ä.) | Sync, FIFO-Rebuild, Metrics-Jobs |
+| Background (APScheduler) | Sync → FIFO-Rebuild → Metrics (Intervalle per Env) |
+| `/app/logs` | Rotierende App-Logs (Volume / Unraid Appdata) |
 
 ```yaml
 services:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -17,6 +18,7 @@ from portmetrics.db.session import get_session_factory
 from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import list_open_lots, rebuild_lots, simulate_sell
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
+from portmetrics.logging_setup import configure_logging
 from portmetrics.metrics.periods import (
     cagr,
     compute_standard_periods,
@@ -34,9 +36,21 @@ from portmetrics.paperless.staging import (
     reject_staging,
     sync_paperless_documents,
 )
+from portmetrics.scheduler import start_scheduler, stop_scheduler
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
 
-app = FastAPI(title="PortMetrics", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    configure_logging()
+    start_scheduler()
+    try:
+        yield
+    finally:
+        stop_scheduler()
+
+
+app = FastAPI(title="PortMetrics", version="0.1.0", lifespan=lifespan)
 
 WEB_DIST = Path(settings.web_dist_dir)
 
