@@ -41,7 +41,7 @@ $env:DATABASE_URL="postgresql+psycopg://user:pass@HOST:5432/portmetrics"
 alembic upgrade head
 ```
 
-(Stand 0.2.0: inkl. `0002_app_settings`.)
+(Stand: inkl. `0003_nullable_activity_account_id`.)
 
 3. `.env` aus [`.env.example`](../.env.example) — mind. `DATABASE_URL`, optional Ghostfolio/Paperless.
 4. Optional Reverse Proxy (z. B. Nginx Proxy Manager): Host auf Container-Port `8080` zeigen.

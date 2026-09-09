@@ -13,6 +13,8 @@ from portmetrics.db.models import Activity, SyncState
 from portmetrics.ghostfolio.client import GhostfolioActivity, GhostfolioClient, trade_date_of
 
 GHOSTFOLIO_SOURCE = "ghostfolio"
+# Matches activities.type CHECK constraint (Ghostfolio also has LIABILITY).
+SUPPORTED_ACTIVITY_TYPES = frozenset({"BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"})
 
 
 @dataclass(frozen=True)
@@ -100,13 +102,14 @@ def update_sync_state(
 
 
 def sync_ghostfolio_activities(session: Session, client: GhostfolioClient) -> SyncResult:
-    activities = client.list_activities()
+    fetched = client.list_activities()
+    activities = [a for a in fetched if a.type.upper() in SUPPORTED_ACTIVITY_TYPES]
     checksum = _checksum(activities)
     upserted = upsert_activities(session, activities)
     update_sync_state(
         session,
         source=GHOSTFOLIO_SOURCE,
         checksum=checksum,
-        fetched=len(activities),
+        fetched=len(fetched),
     )
-    return SyncResult(fetched=len(activities), upserted=upserted, checksum=checksum)
+    return SyncResult(fetched=len(fetched), upserted=upserted, checksum=checksum)

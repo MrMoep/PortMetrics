@@ -39,6 +39,26 @@ def test_ghostfolio_activity_requires_symbol() -> None:
         )
 
 
+def test_ghostfolio_activity_allows_null_account_id(sample_activity_payload: dict) -> None:
+    sample_activity_payload["accountId"] = None
+    activity = GhostfolioActivity.from_api(sample_activity_payload)
+    assert activity.account_id is None
+
+
+def test_upsert_activities_with_null_account_id(
+    db_session,
+    sample_activity_payload: dict,
+) -> None:
+    sample_activity_payload["accountId"] = None
+    activity = GhostfolioActivity.from_api(sample_activity_payload)
+    assert upsert_activities(db_session, [activity]) == 1
+    db_session.flush()
+
+    row = db_session.scalars(select(Activity)).one()
+    assert row.account_id is None
+    assert row.symbol == "VWCE.DE"
+
+
 def test_list_activities_uses_activities_endpoint(sample_activity_payload: dict) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/auth/anonymous"):
@@ -113,6 +133,47 @@ def test_sync_ghostfolio_activities_updates_sync_state(
     assert state is not None
     assert state.checksum == result.checksum
     assert state.meta == {"fetched": 1}
+
+
+def test_sync_skips_unsupported_activity_types(
+    db_session,
+    sample_activity_payload: dict,
+) -> None:
+    liability = {
+        **sample_activity_payload,
+        "id": str(UUID(int=2)),
+        "type": "LIABILITY",
+        "accountId": None,
+        "SymbolProfile": {
+            "symbol": "RENT",
+            "isin": None,
+            "dataSource": "MANUAL",
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/anonymous"):
+            return httpx.Response(200, json={"authToken": "jwt-test"})
+        if request.url.path.endswith("/activities"):
+            return httpx.Response(
+                200,
+                json={"activities": [sample_activity_payload, liability]},
+            )
+        raise AssertionError(request.url.path)
+
+    client = GhostfolioClient(
+        "http://ghostfolio.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = sync_ghostfolio_activities(db_session, client)
+    db_session.flush()
+
+    assert result.fetched == 2
+    assert result.upserted == 1
+    rows = db_session.scalars(select(Activity)).all()
+    assert len(rows) == 1
+    assert rows[0].type == "BUY"
 
 
 def test_auth_failure_raises() -> None:

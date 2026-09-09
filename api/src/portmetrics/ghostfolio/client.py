@@ -17,7 +17,8 @@ class GhostfolioActivity(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: UUID
-    account_id: str = Field(alias="accountId")
+    # Ghostfolio API: accountId is optional (Prisma Order.accountId String?)
+    account_id: str | None = Field(default=None, alias="accountId")
     currency: str
     date: datetime
     fee: Decimal = Decimal("0")
