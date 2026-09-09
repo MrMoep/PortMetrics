@@ -17,7 +17,7 @@ def test_health() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert "env" in body
-    assert body["version"] == "0.1.0"
+    assert body["version"] == "0.2.0"
 
 
 def test_api_version() -> None:
@@ -25,7 +25,7 @@ def test_api_version() -> None:
     response = client.get("/api/version")
     assert response.status_code == 200
     body = response.json()
-    assert body["version"] == "0.1.0"
+    assert body["version"] == "0.2.0"
     assert body["repository"] == "https://github.com/MrMoep/PortMetrics"
 
 
