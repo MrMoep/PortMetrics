@@ -14,6 +14,11 @@ def normalize_database_url(url: str) -> str:
     return url
 
 
+def parse_cors_origins(value: str) -> list[str]:
+    """Split a comma-separated CORS_ORIGINS value into trimmed origins."""
+    return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -36,6 +41,8 @@ class Settings(BaseSettings):
     ghostfolio_default_account_id: str | None = None
     ghostfolio_data_source: str = "YAHOO"
     paperless_tag: str | None = None  # optional: only sync docs with this tag name
+    # Comma-separated browser origins, e.g. https://portmetric.mrcarott.de
+    cors_origins: str = ""
 
     @property
     def effective_database_url(self) -> str:
@@ -43,6 +50,10 @@ class Settings(BaseSettings):
         if self.app_env in {"test", "development"} and self.test_database_url:
             return normalize_database_url(self.test_database_url)
         return normalize_database_url(self.database_url)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return parse_cors_origins(self.cors_origins)
 
 
 @lru_cache

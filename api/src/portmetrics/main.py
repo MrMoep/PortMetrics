@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
@@ -52,6 +53,15 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="PortMetrics", version=__version__, lifespan=lifespan)
+
+if settings.cors_origin_list:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 WEB_DIST = Path(settings.web_dist_dir)
 
