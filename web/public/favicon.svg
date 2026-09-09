@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PortMetrics">
+  <rect width="64" height="64" fill="#1fa39a"/>
+  <path
+    fill="#f4f6f8"
+    d="M18 12h18.5c9.2 0 15.5 5.6 15.5 14.2 0 8.5-6.4 14.3-15.7 14.3H28v11.5H18V12zm10 8.2v12.1h8c4.6 0 7.4-2.5 7.4-6.1s-2.8-6-7.5-6H28z"
+  />
+  <path
+    fill="none"
+    stroke="#0e1114"
+    stroke-width="3.2"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+    d="M22 34 L30 28 L38 36 L48 18"
+  />
+  <circle cx="48" cy="18" r="3.2" fill="#f4f6f8"/>
+</svg>

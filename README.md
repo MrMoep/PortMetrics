@@ -40,6 +40,7 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 | [docs/PAPERLESS.md](docs/PAPERLESS.md) | Custom Fields, Mapping, Webhook |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Branches, lokal testen, CI |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phasen & Future |
+| [docs/DESIGN.md](docs/DESIGN.md) | UI Design System (Terminal / Ledger) |
 
 ## Tech-Stack
 
