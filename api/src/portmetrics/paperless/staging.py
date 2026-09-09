@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -35,6 +36,14 @@ class StagingSyncResult:
     scanned: int
     upserted: int
     skipped: int
+
+
+@dataclass(frozen=True)
+class DocumentIngestResult:
+    document_id: int
+    action: str  # upserted | skipped | error
+    reason: str | None = None
+    staging_id: int | None = None
 
 
 def _as_decimal(value: Any, default: str = "0") -> Decimal:
@@ -108,6 +117,40 @@ def _normalize_to_roles(fields: dict[str, Any]) -> dict[str, Any]:
     return {role: fields.get(role) for role in FIELD_ROLES}
 
 
+def _upsert_document_from_fields(
+    session: Session,
+    document: dict[str, Any],
+    fields: dict[str, Any],
+) -> DocumentIngestResult:
+    doc_id = int(document["id"])
+    status_hint = str(fields.get("import_status") or "").strip().lower()
+    if status_hint == STATUS_IMPORTED and fields.get("activity_id"):
+        return DocumentIngestResult(doc_id, "skipped", "already imported in Paperless")
+    if not fields.get("isin") and not fields.get("symbol"):
+        return DocumentIngestResult(doc_id, "skipped", "missing isin/symbol")
+    try:
+        payload = build_staging_payload(document, fields)
+    except ValueError as exc:
+        return DocumentIngestResult(doc_id, "skipped", str(exc))
+
+    row = session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == doc_id))
+    if row and row.status == STATUS_IMPORTED:
+        return DocumentIngestResult(doc_id, "skipped", "already imported locally", row.id)
+    if row is None:
+        row = StagingImport(paperless_doc_id=doc_id, payload=payload, status=STATUS_PENDING)
+        session.add(row)
+        session.flush()
+    else:
+        row.payload = payload
+        if row.status == STATUS_REJECTED:
+            pass
+        elif row.status != STATUS_IMPORTED:
+            row.status = STATUS_PENDING
+            row.error = None
+        session.flush()
+    return DocumentIngestResult(doc_id, "upserted", staging_id=row.id)
+
+
 def sync_paperless_documents(
     session: Session,
     client: PaperlessClient,
@@ -124,39 +167,70 @@ def sync_paperless_documents(
     skipped = 0
     for document in documents:
         fields = extract_fields_by_roles(document, role_map)
-        status_hint = str(fields.get("import_status") or "").strip().lower()
-        if status_hint == STATUS_IMPORTED and fields.get("activity_id"):
-            skipped += 1
-            continue
-        if not fields.get("isin") and not fields.get("symbol"):
-            skipped += 1
-            continue
-        try:
-            payload = build_staging_payload(document, fields)
-        except ValueError:
-            skipped += 1
-            continue
-
-        doc_id = int(document["id"])
-        row = session.scalar(
-            select(StagingImport).where(StagingImport.paperless_doc_id == doc_id)
-        )
-        if row and row.status == STATUS_IMPORTED:
-            skipped += 1
-            continue
-        if row is None:
-            row = StagingImport(paperless_doc_id=doc_id, payload=payload, status=STATUS_PENDING)
-            session.add(row)
+        result = _upsert_document_from_fields(session, document, fields)
+        if result.action == "upserted":
+            upserted += 1
         else:
-            row.payload = payload
-            if row.status == STATUS_REJECTED:
-                pass
-            elif row.status != STATUS_IMPORTED:
-                row.status = STATUS_PENDING
-                row.error = None
-        upserted += 1
+            skipped += 1
     session.flush()
     return StagingSyncResult(scanned=len(documents), upserted=upserted, skipped=skipped)
+
+
+def ingest_paperless_document(
+    session: Session,
+    client: PaperlessClient,
+    document_id: int,
+) -> DocumentIngestResult:
+    """Fetch one Paperless document and upsert into staging_imports."""
+    role_map = resolve_role_field_map(session, client)
+    ensure_required_roles(role_map)
+    document = client.get_document(document_id)
+    fields = extract_fields_by_roles(document, role_map)
+    result = _upsert_document_from_fields(session, document, fields)
+    session.flush()
+    return result
+
+
+def parse_paperless_document_id(payload: Any) -> int | None:
+    """Extract document id from webhook JSON / form-like payloads."""
+    if payload is None:
+        return None
+    if isinstance(payload, int):
+        return payload
+    if isinstance(payload, str):
+        text = payload.strip()
+        if text.isdigit():
+            return int(text)
+        return _document_id_from_url(text)
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("document_id", "doc_id", "id", "DOCUMENT_ID"):
+        raw = payload.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            parsed = _document_id_from_url(str(raw))
+            if parsed is not None:
+                return parsed
+
+    for key in ("doc_url", "document_url", "url"):
+        parsed = _document_id_from_url(str(payload.get(key) or ""))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _document_id_from_url(url: str) -> int | None:
+    match = re.search(r"/documents/(\d+)", url)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"/api/documents/(\d+)", url)
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def list_staging(

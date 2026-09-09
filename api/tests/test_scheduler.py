@@ -18,6 +18,21 @@ def test_build_scheduler_registers_jobs() -> None:
     assert ids == {"sync_ghostfolio", "rebuild_metrics"}
 
 
+def test_build_scheduler_includes_paperless_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr("portmetrics.scheduler.settings.paperless_sync_interval_minutes", 15)
+    scheduler = build_scheduler()
+    ids = {job.id for job in scheduler.get_jobs()}
+    assert "sync_paperless" in ids
+
+
+def test_job_paperless_skips_without_config(monkeypatch) -> None:
+    from portmetrics.scheduler import job_sync_paperless
+
+    monkeypatch.setattr("portmetrics.scheduler.settings.paperless_url", None)
+    monkeypatch.setattr("portmetrics.scheduler.settings.paperless_token", None)
+    job_sync_paperless()
+
+
 def test_job_sync_skips_without_config(monkeypatch) -> None:
     monkeypatch.setattr("portmetrics.scheduler.settings.ghostfolio_url", None)
     monkeypatch.setattr("portmetrics.scheduler.settings.ghostfolio_access_token", None)

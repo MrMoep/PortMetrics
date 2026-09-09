@@ -116,3 +116,45 @@ def test_staging_list_empty(engine) -> None:
         assert response.json() == {"count": 0, "items": []}
     finally:
         app.dependency_overrides.clear()
+
+
+def test_webhook_requires_secret_configured(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(paperless_webhook_secret=None),
+    )
+
+    def override_db():
+        yield MagicMock()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post("/api/webhooks/paperless", json={"document_id": 1})
+        assert response.status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_webhook_rejects_bad_secret(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(paperless_webhook_secret="correct"),
+    )
+
+    def override_db():
+        yield MagicMock()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/webhooks/paperless",
+            json={"document_id": 1},
+            headers={"X-PortMetrics-Secret": "wrong"},
+        )
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides.clear()

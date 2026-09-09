@@ -267,3 +267,36 @@ def test_confirm_missing_raises(db_session) -> None:
     ghostfolio = GhostfolioClient("http://ghostfolio.test", "tok", transport=bad)
     with pytest.raises(LookupError):
         confirm_staging(db_session, 99999, ghostfolio)
+
+
+def test_parse_paperless_document_id() -> None:
+    from portmetrics.paperless.staging import parse_paperless_document_id
+
+    assert parse_paperless_document_id({"document_id": 42}) == 42
+    assert parse_paperless_document_id({"doc_url": "https://p.example/documents/99/details"}) == 99
+    assert parse_paperless_document_id("https://p.example/api/documents/7/") == 7
+    assert parse_paperless_document_id({"id": "nope"}) is None
+
+
+def test_ingest_paperless_document(db_session) -> None:
+    from portmetrics.paperless.staging import ingest_paperless_document
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handled = _fields_handler(request)
+        if handled:
+            return handled
+        if request.url.path.endswith("/documents/77/"):
+            return httpx.Response(200, json=_doc(77))
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = ingest_paperless_document(db_session, client, 77)
+    assert result.action == "upserted"
+    assert result.document_id == 77
+    row = db_session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == 77))
+    assert row is not None
+    assert row.status == STATUS_PENDING

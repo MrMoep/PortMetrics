@@ -464,9 +464,22 @@ export default function App() {
       {tab === "settings" && (
         <section className="panel">
           <p className="muted">
-            Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. URL/Token bleiben in der Env;
-            Mapping, Tag und Ghostfolio-Defaults werden in der Datenbank gespeichert.
+            Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. URL/Token/Webhook-Secret bleiben
+            in der Env; Mapping, Tag und Ghostfolio-Defaults werden in der Datenbank gespeichert.
           </p>
+          {paperlessSettings && (
+            <p className="muted">
+              Webhook: <span className="mono">{paperlessSettings.webhook_path}</span>
+              {" · "}
+              Secret:{" "}
+              {paperlessSettings.webhook_secret_configured ? "konfiguriert" : "fehlt (Env)"}
+              {" · "}
+              Scheduler-Pull:{" "}
+              {paperlessSettings.paperless_sync_interval_minutes > 0
+                ? `alle ${paperlessSettings.paperless_sync_interval_minutes} Min`
+                : "aus"}
+            </p>
+          )}
           {paperlessSettings && !paperlessSettings.paperless_configured && (
             <p className="status error">
               PAPERLESS_URL / PAPERLESS_TOKEN sind nicht konfiguriert — Custom Fields können nicht

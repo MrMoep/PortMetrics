@@ -70,6 +70,9 @@ export type PaperlessSettings = {
   ghostfolio_default_account_id: string | null;
   ghostfolio_data_source: string;
   paperless_configured: boolean;
+  webhook_secret_configured: boolean;
+  webhook_path: string;
+  paperless_sync_interval_minutes: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

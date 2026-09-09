@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from portmetrics import __version__
-from portmetrics.config import settings
+from portmetrics.config import settings, webhook_secret_matches
 from portmetrics.db.models import Activity, SyncState
 from portmetrics.db.session import get_session_factory
 from portmetrics.fifo.engine import FifoError
@@ -39,7 +39,9 @@ from portmetrics.paperless.mapping import (
 )
 from portmetrics.paperless.staging import (
     confirm_staging,
+    ingest_paperless_document,
     list_staging,
+    parse_paperless_document_id,
     reject_staging,
     sync_paperless_documents,
 )
@@ -280,9 +282,7 @@ def staging_sync(db: Session = Depends(get_db)) -> dict:
     }
 
 
-@app.get("/api/settings/paperless")
-def settings_paperless_get(db: Session = Depends(get_db)) -> dict:
-    cfg = get_paperless_settings(db)
+def _paperless_settings_payload(cfg: dict) -> dict:
     return {
         "roles": list(FIELD_ROLES),
         "field_map": cfg["field_map"],
@@ -290,7 +290,15 @@ def settings_paperless_get(db: Session = Depends(get_db)) -> dict:
         "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
         "ghostfolio_data_source": cfg["ghostfolio_data_source"],
         "paperless_configured": bool(settings.paperless_url and settings.paperless_token),
+        "webhook_secret_configured": bool(settings.paperless_webhook_secret),
+        "webhook_path": "/api/webhooks/paperless",
+        "paperless_sync_interval_minutes": settings.paperless_sync_interval_minutes,
     }
+
+
+@app.get("/api/settings/paperless")
+def settings_paperless_get(db: Session = Depends(get_db)) -> dict:
+    return _paperless_settings_payload(get_paperless_settings(db))
 
 
 @app.put("/api/settings/paperless")
@@ -299,14 +307,7 @@ def settings_paperless_put(payload: dict, db: Session = Depends(get_db)) -> dict
         cfg = save_paperless_settings(db, payload)
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "roles": list(FIELD_ROLES),
-        "field_map": cfg["field_map"],
-        "tag": cfg["tag"],
-        "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
-        "ghostfolio_data_source": cfg["ghostfolio_data_source"],
-        "paperless_configured": bool(settings.paperless_url and settings.paperless_token),
-    }
+    return _paperless_settings_payload(cfg)
 
 
 @app.get("/api/settings/paperless/custom-fields")
@@ -341,6 +342,61 @@ def settings_paperless_test() -> dict:
         "ok": True,
         "custom_field_count": len(fields),
         "url": settings.paperless_url,
+    }
+
+
+@app.post("/api/webhooks/paperless")
+async def webhook_paperless(
+    request: Request,
+    db: Session = Depends(get_db),
+    x_portmetrics_secret: str | None = Header(default=None, alias="X-PortMetrics-Secret"),
+) -> dict:
+    if not settings.paperless_webhook_secret:
+        raise HTTPException(
+            status_code=503,
+            detail="PAPERLESS_WEBHOOK_SECRET is not configured",
+        )
+    provided = x_portmetrics_secret or request.query_params.get("secret")
+    if not webhook_secret_matches(provided, settings.paperless_webhook_secret):
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    content_type = (request.headers.get("content-type") or "").lower()
+    payload: object
+    if "application/json" in content_type:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+    elif (
+        "application/x-www-form-urlencoded" in content_type
+        or "multipart/form-data" in content_type
+    ):
+        form = await request.form()
+        payload = dict(form)
+    else:
+        raw = (await request.body()).decode("utf-8", errors="replace").strip()
+        payload = raw if raw else {}
+
+    document_id = parse_paperless_document_id(payload)
+    if document_id is None and isinstance(payload, dict):
+        # Nested body used by some webhook templates
+        document_id = parse_paperless_document_id(payload.get("document"))
+    if document_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not resolve document id (send document_id or doc_url)",
+        )
+
+    client = _paperless_client()
+    try:
+        result = ingest_paperless_document(db, client, document_id)
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "document_id": result.document_id,
+        "action": result.action,
+        "reason": result.reason,
+        "staging_id": result.staging_id,
     }
 
 

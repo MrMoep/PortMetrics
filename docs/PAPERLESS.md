@@ -30,19 +30,38 @@ Optional: Tag in den Einstellungen (oder Env `PAPERLESS_TAG`) — nur Dokumente 
 ## Workflow
 
 ```
-PDF → P-GPT / manuelle Felder → POST /api/staging/sync
-    → Review in Dashboard (Tab Staging)
-    → Confirm → Ghostfolio POST /api/v1/import
-    → import_status=imported + document_links
-    → Sync Ghostfolio → FIFO
+PDF → P-GPT / Felder
+  → Webhook (document updated) oder Sync/Scheduler
+  → staging_imports
+  → Review (Confirm/Reject) im Dashboard
+  → Ghostfolio Import → document_links
+  → Sync Ghostfolio → FIFO
 ```
+
+### Webhook (empfohlen)
+
+1. `PAPERLESS_WEBHOOK_SECRET` in PortMetrics setzen.
+2. In Paperless einen Workflow anlegen:
+   - Trigger: **Document updated** (nicht nur added — Custom Fields oft erst später)
+   - Filter: optional Tag (z. B. `wertpapier`)
+   - Action: Webhook `POST` auf `https://<portmetrics>/api/webhooks/paperless`
+   - Header: `X-PortMetrics-Secret: <secret>` (oder Query `?secret=`)
+   - Body JSON z. B. `{ "doc_url": "{doc_url}" }` oder `{ "document_id": "<id>" }`
+3. Confirm/Reject weiterhin nur im Staging-Tab.
+
+Unvollständige Felder werden übersprungen (`action=skipped`); manueller Sync bleibt als Fallback.
+
+### Scheduler (optional Catch-up)
+
+`PAPERLESS_SYNC_INTERVAL_MINUTES>0` aktiviert einen periodischen Full-Pull (Hybrid zu Webhook). `0` = aus.
 
 ## API
 
 | Methode | Pfad | Zweck |
 |---------|------|-------|
 | `GET` | `/api/staging?status=pending` | Review-Queue |
-| `POST` | `/api/staging/sync` | Paperless → Staging |
+| `POST` | `/api/staging/sync` | Paperless → Staging (manuell) |
+| `POST` | `/api/webhooks/paperless` | Auto-Ingest eines Docs |
 | `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio |
 | `POST` | `/api/staging/{id}/reject` | Ablehnen |
 | `GET` | `/api/settings/paperless` | Mapping + Tag + GF-Defaults |
@@ -56,8 +75,10 @@ PDF → P-GPT / manuelle Felder → POST /api/staging/sync
 PAPERLESS_URL=http://paperless:8000
 PAPERLESS_TOKEN=
 PAPERLESS_TAG=
+PAPERLESS_WEBHOOK_SECRET=
+PAPERLESS_SYNC_INTERVAL_MINUTES=0
 GHOSTFOLIO_DEFAULT_ACCOUNT_ID=
 GHOSTFOLIO_DATA_SOURCE=YAHOO
 ```
 
-`PAPERLESS_URL` / `PAPERLESS_TOKEN` bleiben Env. Tag, Field-Map und Ghostfolio-Defaults können in der UI überschrieben und in `app_settings` persistiert werden.
+`PAPERLESS_URL` / `PAPERLESS_TOKEN` / `PAPERLESS_WEBHOOK_SECRET` bleiben Env. Tag, Field-Map und Ghostfolio-Defaults können in der UI überschrieben und in `app_settings` persistiert werden.
