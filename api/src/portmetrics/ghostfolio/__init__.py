@@ -1,0 +1,1 @@
+"""Ghostfolio API client package."""

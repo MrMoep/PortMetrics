@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+
+from portmetrics.db.models import Activity
+from portmetrics.metrics.periods import (
+    cagr,
+    compute_standard_periods,
+    dividend_summary,
+    nav_as_of,
+    period_return,
+)
+
+
+def _act(
+    *,
+    day: date,
+    typ: str,
+    qty: str,
+    price: str,
+    isin: str = "IE00",
+    fee: str = "0",
+) -> Activity:
+    return Activity(
+        id=1,
+        gf_activity_id=__import__("uuid").uuid4(),
+        account_id="a",
+        isin=isin,
+        symbol=isin,
+        type=typ,
+        quantity=Decimal(qty),
+        unit_price=Decimal(price),
+        fee=Decimal(fee),
+        currency="EUR",
+        trade_date=day,
+    )
+
+
+def test_period_return_with_contribution() -> None:
+    activities = [
+        _act(day=date(2024, 1, 1), typ="BUY", qty="10", price="100"),
+    ]
+    # mutate ids uniquely
+    activities[0].id = 1
+    activities.append(
+        Activity(
+            id=2,
+            gf_activity_id=__import__("uuid").uuid4(),
+            account_id="a",
+            isin="IE00",
+            symbol="IE00",
+            type="BUY",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2024, 6, 1),
+        )
+    )
+    prices = {
+        ("IE00", date(2024, 1, 1)): Decimal("100"),
+        ("IE00", date(2024, 12, 31)): Decimal("110"),
+    }
+    # Without explicit mid prices, last trade price carries forward via last_trade_price_as_of
+    result = period_return(
+        activities,
+        prices,
+        label="ytd",
+        start=date(2024, 1, 1),
+        end=date(2024, 12, 31),
+    )
+    assert result.end_nav == Decimal("2200")  # 20 * 110
+    assert result.contributions == Decimal("2000")
+    assert result.period_return is not None
+
+
+def test_nav_uses_holdings() -> None:
+    a = _act(day=date(2024, 1, 1), typ="BUY", qty="5", price="10")
+    a.id = 1
+    prices = {("IE00", date(2024, 2, 1)): Decimal("12")}
+    assert nav_as_of([a], prices, date(2024, 2, 1)) == Decimal("60")
+
+
+def test_dividends_sum() -> None:
+    buy = _act(day=date(2024, 1, 1), typ="BUY", qty="1", price="10")
+    buy.id = 1
+    div = Activity(
+        id=2,
+        gf_activity_id=__import__("uuid").uuid4(),
+        account_id="a",
+        isin="IE00",
+        symbol="IE00",
+        type="DIVIDEND",
+        quantity=Decimal("1"),
+        unit_price=Decimal("2.5"),
+        fee=Decimal("0"),
+        currency="EUR",
+        trade_date=date(2024, 3, 1),
+    )
+    summary = dividend_summary([buy, div])
+    assert summary["total"] == "2.5"
+
+
+def test_standard_periods_and_cagr_smoke() -> None:
+    a = _act(day=date(2023, 1, 1), typ="BUY", qty="10", price="100")
+    a.id = 1
+    activities = [a]
+    prices = {
+        ("IE00", date(2023, 1, 1)): Decimal("100"),
+        ("IE00", date(2024, 1, 1)): Decimal("110"),
+    }
+    periods = compute_standard_periods(activities, prices, as_of=date(2024, 1, 1))
+    assert any(p.label == "ytd" for p in periods)
+    result = cagr(activities, prices, start=date(2023, 1, 1), end=date(2024, 1, 1))
+    assert result["cagr"] is not None

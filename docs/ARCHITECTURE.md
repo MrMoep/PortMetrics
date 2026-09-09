@@ -26,20 +26,23 @@ Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im
 |----------------|---------|
 | `/` | React SPA (statisch ausgeliefert von FastAPI) |
 | `/api/...` | REST API |
-| `/health` | Health-Check |
-| Background (APScheduler o. Ä.) | Sync, FIFO-Rebuild, Metrics-Jobs |
+| `/health`, `/api/version` | Health + Versionsinfo (Dashboard-Link zum Repo) |
+| Background (APScheduler) | Sync → FIFO-Rebuild → Metrics (Intervalle per Env) |
+| `/app/logs` | Rotierende App-Logs (Volume / Unraid Appdata) |
 
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/<owner>/portmetrics:latest   # gebaut bei Push auf main
+    image: ghcr.io/mrmoep/portmetrics:0.1.0   # oder :latest
     ports:
       - "8080:8080"
     env_file: .env
+    volumes:
+      - /mnt/user/appdata/portmetrics/logs:/app/logs
     # PostgreSQL bleibt extern (bestehende Unraid-Instanz)
 ```
 
-Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP.
+Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP. Ausführlich: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ### Datenbanken
 
@@ -63,7 +66,7 @@ Die Trennung API / Worker / Web wäre sauber skalierbar, ist für einen Nutzer u
 | FIFO-Lots, Perioden-KPIs | PostgreSQL (abgeleitet) |
 | Tageskurse | Ghostfolio → gespiegelt in `price_snapshots` |
 
-Paperless ist **nicht** das Ledger — Extraktionsfehler werden im Staging abgefangen, bevor sie Ghostfolio erreichen.
+Paperless ist **nicht** das Ledger — Extraktionsfehler werden im Staging abgefangen, bevor sie Ghostfolio erreichen. Setup der Custom Fields: [PAPERLESS.md](PAPERLESS.md).
 
 ## Authentifizierung
 
