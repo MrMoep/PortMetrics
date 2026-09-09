@@ -1,6 +1,8 @@
 # Datenmodell
 
-PostgreSQL-Schema: `portmetrics`
+PostgreSQL-Schema: `portmetrics` (Stand Release **0.1.0**).
+
+Migrationen: `api/alembic/versions/` — lokal/Prod mit `alembic upgrade head`.
 
 ## Entity-Relationship (konzeptionell)
 

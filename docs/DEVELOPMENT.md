@@ -94,6 +94,14 @@ Produktiv: dieselbe Migration gegen `portmetrics` (`APP_ENV=production`).
 
 ## Image-Tags (nach Merge auf `main`)
 
-- `ghcr.io/<owner>/portmetrics:latest`
-- `ghcr.io/<owner>/portmetrics:<git-sha>`
-- `ghcr.io/<owner>/portmetrics:<semver>` — wenn ein Tag `v*` gepusht wird
+- `ghcr.io/mrmoep/portmetrics:latest`
+- `ghcr.io/mrmoep/portmetrics:<git-sha>`
+- `ghcr.io/mrmoep/portmetrics:0.1.0` — bei Tag `v0.1.0`
+
+## Versionierung
+
+- Python: `api/src/portmetrics/__init__.py` → `__version__` (auch FastAPI/`/api/version`)
+- Frontend-Package: `web/package.json`
+- Release: Git-Tag `vMAJOR.MINOR.PATCH` + GitHub Release; Image-Tag folgt dem Workflow
+
+Siehe [CHANGELOG.md](../CHANGELOG.md), [DEPLOYMENT.md](DEPLOYMENT.md), [API.md](API.md).

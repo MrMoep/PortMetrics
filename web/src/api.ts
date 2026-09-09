@@ -51,6 +51,12 @@ export type StagingItem = {
   error: string | null;
 };
 
+export type VersionInfo = {
+  name: string;
+  version: string;
+  repository: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -64,6 +70,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  version: () => request<VersionInfo>("/api/version"),
   overview: () => request<Overview>("/api/metrics/overview"),
   lots: () => request<{ lots: Lot[] }>("/api/lots"),
   sync: () => request<Record<string, unknown>>("/api/sync/ghostfolio", { method: "POST" }),

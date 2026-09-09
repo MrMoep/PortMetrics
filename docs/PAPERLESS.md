@@ -2,6 +2,8 @@
 
 Paperless NGX ist **Belegarchiv + Staging**, nicht das Ledger. Extrahierte Felder landen in `staging_imports`, werden geprüft und erst dann nach Ghostfolio importiert.
 
+Teil von **PortMetrics 0.1.0**. Verwandt: [API.md](API.md), [DATA_MODEL.md](DATA_MODEL.md).
+
 ## Custom Fields (einmalig in Paperless anlegen)
 
 | Name | Typ (Empfehlung) | Pflicht | Beschreibung |

@@ -26,21 +26,23 @@ Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im
 |----------------|---------|
 | `/` | React SPA (statisch ausgeliefert von FastAPI) |
 | `/api/...` | REST API |
-| `/health` | Health-Check |
+| `/health`, `/api/version` | Health + Versionsinfo (Dashboard-Link zum Repo) |
 | Background (APScheduler) | Sync → FIFO-Rebuild → Metrics (Intervalle per Env) |
 | `/app/logs` | Rotierende App-Logs (Volume / Unraid Appdata) |
 
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/<owner>/portmetrics:latest   # gebaut bei Push auf main
+    image: ghcr.io/mrmoep/portmetrics:0.1.0   # oder :latest
     ports:
       - "8080:8080"
     env_file: .env
+    volumes:
+      - /mnt/user/appdata/portmetrics/logs:/app/logs
     # PostgreSQL bleibt extern (bestehende Unraid-Instanz)
 ```
 
-Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP.
+Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP. Ausführlich: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ### Datenbanken
 
