@@ -75,7 +75,7 @@ Die Umsetzung ist in Phasen gegliedert — siehe [GitHub Issues](https://github.
 
 ## Status
 
-Scaffold + CI/CD-Workflows. Fachliche Phasen folgen über Feature-PRs nach `dev`.
+Phasen 0–2 und 4 auf `dev` (Sync, FIFO, Metriken, Dashboard). Phase 3 (Paperless) folgt. Single-Container inkl. APScheduler-Jobs und Log-Volume.
 
 ## Lizenz
 
