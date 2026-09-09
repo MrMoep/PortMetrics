@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     paperless_url: str | None = None
     paperless_token: str | None = None
     default_tax_rate: str = "0.26375"  # DE Abgeltungsteuer + Soli (Schätzung)
+    web_dist_dir: str = "/app/web/dist"
 
     @property
     def effective_database_url(self) -> str:
