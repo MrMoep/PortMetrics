@@ -51,7 +51,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Ruff
-        run: ruff check .
+        run: ruff check src tests
 
       - name: Pytest
         run: pytest --cov=portmetrics --cov-report=term-missing --cov-fail-under=70
