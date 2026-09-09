@@ -66,7 +66,7 @@ Verkauf → verbrauchte Lots.
 
 | Tabelle | Zweck |
 |---------|-------|
-| `price_snapshots` | Tageskurse (isin, price_date, close_price, source) |
+| `price_snapshots` | Tageskurse aus Ghostfolio (`GET /api/v1/symbol/:ds/:symbol?includeHistoricalData=…`); `isin`-Spalte = Asset-Key (ISIN oder Symbol, wie FIFO/NAV) |
 | `metrics_daily` | Vorberechnete KPIs (nav, invested, mtd_return, ytd_return, …) |
 | `document_links` | Paperless-Dokument ↔ Activity/Lot |
 | `staging_imports` | Review-Queue vor Ghostfolio-Import |

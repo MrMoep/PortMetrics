@@ -14,6 +14,7 @@ from portmetrics.fifo.service import rebuild_lots
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.metrics.periods import rebuild_metrics_daily
 from portmetrics.sync.activities import sync_ghostfolio_activities
+from portmetrics.sync.prices import sync_ghostfolio_prices
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +30,20 @@ def job_sync_and_rebuild() -> None:
     try:
         with session_scope(engine) as session:
             result = sync_ghostfolio_activities(session, client)
+            prices = sync_ghostfolio_prices(
+                session,
+                client,
+                history_days=settings.ghostfolio_price_history_days,
+                default_data_source=settings.ghostfolio_data_source,
+            )
             fifo = rebuild_lots(session)
             days = rebuild_metrics_daily(session)
         logger.info(
-            "scheduled sync ok: fetched=%s upserted=%s lots=%s metrics_days=%s",
+            "scheduled sync ok: fetched=%s upserted=%s prices=%s/%s lots=%s metrics_days=%s",
             result.fetched,
             result.upserted,
+            prices.upserted,
+            prices.assets,
             fifo.lots_created,
             days,
         )

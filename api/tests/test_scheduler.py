@@ -84,9 +84,18 @@ def test_job_sync_happy_path(monkeypatch) -> None:
     monkeypatch.setattr("portmetrics.scheduler.get_engine", lambda: object())
     monkeypatch.setattr("portmetrics.scheduler.GhostfolioClient", lambda *a, **k: object())
     monkeypatch.setattr("portmetrics.scheduler.session_scope", lambda _e: DummySession())
+    class DummyPrices:
+        assets = 2
+        upserted = 10
+        skipped = 0
+
     monkeypatch.setattr(
         "portmetrics.scheduler.sync_ghostfolio_activities",
         lambda *_a, **_k: DummyResult(),
+    )
+    monkeypatch.setattr(
+        "portmetrics.scheduler.sync_ghostfolio_prices",
+        lambda *_a, **_k: DummyPrices(),
     )
     monkeypatch.setattr("portmetrics.scheduler.rebuild_lots", lambda *_a, **_k: DummyFifo())
     monkeypatch.setattr("portmetrics.scheduler.rebuild_metrics_daily", lambda *_a, **_k: 3)
