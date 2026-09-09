@@ -32,14 +32,23 @@ Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im
 ```yaml
 services:
   portmetrics:
-    build: .
+    image: ghcr.io/<owner>/portmetrics:latest   # gebaut bei Push auf main
     ports:
       - "8080:8080"
     env_file: .env
     # PostgreSQL bleibt extern (bestehende Unraid-Instanz)
 ```
 
-Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP. Eigenes Schema/DB `portmetrics` — Ghostfolio-DB nicht teilen.
+Zugriff auf PostgreSQL via `host.docker.internal` oder LAN-IP.
+
+### Datenbanken
+
+| DB | Zweck |
+|----|-------|
+| `portmetrics` | Produktiv |
+| `portmetrics_test` | Tests + lokale Entwicklung |
+
+Entwicklung und CI nutzen die Test-DB (`TEST_DATABASE_URL`). Branching/CI: [docs/DEVELOPMENT.md](DEVELOPMENT.md).
 
 ### Warum nicht 3 Container?
 

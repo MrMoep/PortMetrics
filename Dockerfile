@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS web-build
+WORKDIR /web
+# Frontend landet in Phase 4; Platzhalter damit Single-Container-Build schon jetzt greift.
+RUN mkdir -p /web/dist && echo '<!doctype html><title>PortMetrics</title><p>UI follows in phase 4</p>' > /web/dist/index.html
+
+FROM python:3.12-slim AS runtime
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY api/pyproject.toml /app/api/pyproject.toml
+COPY api/src /app/api/src
+RUN pip install /app/api
+
+COPY --from=web-build /web/dist /app/web/dist
+
+EXPOSE 8080
+CMD ["uvicorn", "portmetrics.main:app", "--host", "0.0.0.0", "--port", "8080"]

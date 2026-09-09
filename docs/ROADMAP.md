@@ -16,8 +16,10 @@
 
 | Issue | Beschreibung |
 |-------|--------------|
-| [#15](https://github.com/MrMoep/PortMetrics/issues/15) | Docker Compose + Projekt-Scaffolding |
+| [#15](https://github.com/MrMoep/PortMetrics/issues/15) | Single Container + Projekt-Scaffolding |
 | [#6](https://github.com/MrMoep/PortMetrics/issues/6) | PostgreSQL Schema + Migrationen |
+
+Branching & lokale Tests: [DEVELOPMENT.md](DEVELOPMENT.md) (`dev` Sammler, Feature-PRs, Image nur auf `main`).
 
 ## Future / nth
 
