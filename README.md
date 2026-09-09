@@ -75,7 +75,7 @@ Die Umsetzung ist in Phasen gegliedert — siehe [GitHub Issues](https://github.
 
 ## Status
 
-Scaffold + CI/CD-Workflows. Fachliche Phasen folgen über Feature-PRs nach `dev`.
+Phasen 0–4 auf Feature-PRs nach `dev` (inkl. Paperless-Staging). Details Paperless: [docs/PAPERLESS.md](docs/PAPERLESS.md).
 
 ## Lizenz
 

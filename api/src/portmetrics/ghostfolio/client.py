@@ -105,6 +105,22 @@ class GhostfolioClient:
                 raw_activities = payload
             return [GhostfolioActivity.from_api(item) for item in raw_activities]
 
+    def import_activities(self, activities: list[dict[str, Any]]) -> dict[str, Any]:
+        with self._client() as client:
+            headers = self._auth_headers()
+            response = client.post(
+                "/api/v1/import",
+                headers=headers,
+                json={"activities": activities},
+            )
+            if response.status_code >= 400:
+                raise GhostfolioError(
+                    f"Ghostfolio import failed ({response.status_code}): {response.text}"
+                )
+            if not response.content:
+                return {"activities": []}
+            return response.json()
+
 
 def trade_date_of(activity: GhostfolioActivity) -> date:
     return activity.date.date()

@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     paperless_token: str | None = None
     default_tax_rate: str = "0.26375"  # DE Abgeltungsteuer + Soli (Schätzung)
     web_dist_dir: str = "/app/web/dist"
+    ghostfolio_default_account_id: str | None = None
+    ghostfolio_data_source: str = "YAHOO"
+    paperless_tag: str | None = None  # optional: only sync docs with this tag name
+
 
     @property
     def effective_database_url(self) -> str:

@@ -63,7 +63,7 @@ Die Trennung API / Worker / Web wäre sauber skalierbar, ist für einen Nutzer u
 | FIFO-Lots, Perioden-KPIs | PostgreSQL (abgeleitet) |
 | Tageskurse | Ghostfolio → gespiegelt in `price_snapshots` |
 
-Paperless ist **nicht** das Ledger — Extraktionsfehler werden im Staging abgefangen, bevor sie Ghostfolio erreichen.
+Paperless ist **nicht** das Ledger — Extraktionsfehler werden im Staging abgefangen, bevor sie Ghostfolio erreichen. Setup der Custom Fields: [PAPERLESS.md](PAPERLESS.md).
 
 ## Authentifizierung
 

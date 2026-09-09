@@ -27,6 +27,13 @@ from portmetrics.metrics.periods import (
     price_map,
     rebuild_metrics_daily,
 )
+from portmetrics.paperless.client import PaperlessClient, PaperlessError
+from portmetrics.paperless.staging import (
+    confirm_staging,
+    list_staging,
+    reject_staging,
+    sync_paperless_documents,
+)
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
 
 app = FastAPI(title="PortMetrics", version="0.1.0")
@@ -194,6 +201,66 @@ def positions(isin: str | None = None, db: Session = Depends(get_db)) -> dict:
 def metrics_rebuild(db: Session = Depends(get_db)) -> dict:
     count = rebuild_metrics_daily(db)
     return {"days_written": count}
+
+
+def _paperless_client() -> PaperlessClient:
+    if not settings.paperless_url or not settings.paperless_token:
+        raise HTTPException(
+            status_code=400,
+            detail="PAPERLESS_URL and PAPERLESS_TOKEN must be configured",
+        )
+    return PaperlessClient(settings.paperless_url, settings.paperless_token)
+
+
+def _ghostfolio_client() -> GhostfolioClient:
+    if not settings.ghostfolio_url or not settings.ghostfolio_access_token:
+        raise HTTPException(
+            status_code=400,
+            detail="GHOSTFOLIO_URL and GHOSTFOLIO_ACCESS_TOKEN must be configured",
+        )
+    return GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)
+
+
+@app.get("/api/staging")
+def staging_list(status: str | None = None, db: Session = Depends(get_db)) -> dict:
+    items = list_staging(db, status=status)
+    return {"count": len(items), "items": items}
+
+
+@app.post("/api/staging/sync")
+def staging_sync(db: Session = Depends(get_db)) -> dict:
+    client = _paperless_client()
+    try:
+        result = sync_paperless_documents(db, client, tag=settings.paperless_tag)
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "scanned": result.scanned,
+        "upserted": result.upserted,
+        "skipped": result.skipped,
+    }
+
+
+@app.post("/api/staging/{staging_id}/confirm")
+def staging_confirm(staging_id: int, db: Session = Depends(get_db)) -> dict:
+    ghostfolio = _ghostfolio_client()
+    paperless = None
+    if settings.paperless_url and settings.paperless_token:
+        paperless = PaperlessClient(settings.paperless_url, settings.paperless_token)
+    try:
+        return confirm_staging(db, staging_id, ghostfolio, paperless)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GhostfolioError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/staging/{staging_id}/reject")
+def staging_reject(staging_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        return reject_staging(db, staging_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 if WEB_DIST.is_dir():
