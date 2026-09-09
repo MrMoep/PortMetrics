@@ -189,7 +189,19 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <h1>PortMetrics</h1>
+          <div className="brand-row">
+            <picture>
+              <source srcSet="/logo-dark.svg" media="(prefers-color-scheme: dark)" />
+              <img
+                className="brand-mark"
+                src="/logo-light.svg"
+                width={40}
+                height={40}
+                alt=""
+              />
+            </picture>
+            <h1>PortMetrics</h1>
+          </div>
           <p>
             FIFO-Lots, Perioden-Rendite, Verkaufs-Simulator
             {" · "}

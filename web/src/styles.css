@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --bg: #f3f1eb;
   --bg-elevated: #fffcf7;
   --ink: #1c2430;
@@ -15,6 +15,23 @@
   color: var(--ink);
   background: radial-gradient(circle at top left, #fff8e8 0%, var(--bg) 42%, #e7eee9 100%);
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12171e;
+    --bg-elevated: #1a222c;
+    --ink: #e8ecf1;
+    --muted: #9aa3b0;
+    --line: #2c3542;
+    --accent: #3d9b88;
+    --accent-soft: #1c3330;
+    --danger: #e07a7a;
+    --ok: #6fbf86;
+    --shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+    background: radial-gradient(circle at top left, #1a2430 0%, var(--bg) 45%, #0f1614 100%);
+  }
+}
+
 
 * {
   box-sizing: border-box;
@@ -52,6 +69,20 @@ input {
 .brand {
   display: grid;
   gap: 4px;
+}
+
+.brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .brand h1 {
@@ -192,6 +223,19 @@ th {
   border-radius: 10px;
   padding: 10px 12px;
   background: white;
+  color: var(--ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  .form input,
+  .form select {
+    background: #141b24;
+  }
+
+  .nav button,
+  .actions button {
+    background: var(--bg-elevated);
+  }
 }
 
 .settings-actions {
