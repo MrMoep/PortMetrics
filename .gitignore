@@ -12,6 +12,8 @@ api/.venv/
 # Node
 node_modules/
 dist/
+web/dist/
+web/node_modules/
 .vite/
 
 # IDE / OS

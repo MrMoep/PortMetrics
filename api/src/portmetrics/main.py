@@ -3,8 +3,11 @@ from __future__ import annotations
 from collections.abc import Generator
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -27,6 +30,8 @@ from portmetrics.metrics.periods import (
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
 
 app = FastAPI(title="PortMetrics", version="0.1.0")
+
+WEB_DIST = Path(settings.web_dist_dir)
 
 
 def get_db() -> Generator[Session]:
@@ -76,6 +81,7 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
     try:
         result = sync_ghostfolio_activities(db, client)
         fifo = rebuild_lots(db)
+        metrics_days = rebuild_metrics_daily(db)
     except GhostfolioError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except FifoError as exc:
@@ -86,6 +92,7 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
         "checksum": result.checksum,
         "lots_created": fifo.lots_created,
         "consumptions": fifo.consumptions,
+        "metrics_days": metrics_days,
     }
 
 
@@ -187,3 +194,18 @@ def positions(isin: str | None = None, db: Session = Depends(get_db)) -> dict:
 def metrics_rebuild(db: Session = Depends(get_db)) -> dict:
     count = rebuild_metrics_daily(db)
     return {"days_written": count}
+
+
+if WEB_DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
+
+    @app.get("/")
+    def spa_index() -> FileResponse:
+        return FileResponse(WEB_DIST / "index.html")
+
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str) -> FileResponse:
+        candidate = WEB_DIST / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(WEB_DIST / "index.html")

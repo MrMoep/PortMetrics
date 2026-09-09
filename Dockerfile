@@ -2,14 +2,18 @@
 
 FROM node:22-alpine AS web-build
 WORKDIR /web
-RUN mkdir -p /web/dist && echo '<!doctype html><title>PortMetrics</title><p>UI follows in phase 4</p>' > /web/dist/index.html
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ ./
+RUN npm run build
 
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    WEB_DIST_DIR=/app/web/dist
 
 COPY api/pyproject.toml /app/api/pyproject.toml
 COPY api/src /app/api/src
