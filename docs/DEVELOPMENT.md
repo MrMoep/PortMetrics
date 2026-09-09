@@ -55,9 +55,11 @@ Auf deiner PostgreSQL-18-Instanz (Unraid):
 
 ```env
 APP_ENV=development
-DATABASE_URL=postgresql://user:pass@HOST:5432/portmetrics_test
-TEST_DATABASE_URL=postgresql://user:pass@HOST:5432/portmetrics_test
+DATABASE_URL=postgresql+psycopg://user:pass@HOST:5432/portmetrics_test
+TEST_DATABASE_URL=postgresql+psycopg://user:pass@HOST:5432/portmetrics_test
 ```
+
+> Hinweis: SQLAlchemy + psycopg3 braucht den Dialekt `postgresql+psycopg://` (nicht nur `postgresql://`).
 
 Produktiv (Unraid Container / `.env` auf dem Server) → **Prod-DB**:
 
@@ -74,6 +76,17 @@ Pytest nutzt bevorzugt `TEST_DATABASE_URL`, sonst `DATABASE_URL`. So kann die Pr
 |----------|---------|-----|
 | **CI** (`.github/workflows/ci.yml`) | PR nach `dev`/`main`, Push auf `dev` | Lint + Pytest (+ Coverage) |
 | **Release Image** (`.github/workflows/release-image.yml`) | Push auf `main` | Docker-Image → `ghcr.io/<owner>/portmetrics` |
+
+## Datenbank-Migrationen
+
+```powershell
+cd api
+$env:DATABASE_URL="postgresql://user:pass@HOST:5432/portmetrics_test"
+$env:APP_ENV="test"
+alembic upgrade head
+```
+
+Produktiv: dieselbe Migration gegen `portmetrics` (`APP_ENV=production`).
 
 ## Image-Tags (nach Merge auf `main`)
 
