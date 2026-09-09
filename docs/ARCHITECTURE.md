@@ -33,7 +33,7 @@ Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/mrmoep/portmetrics:0.1.0   # oder :latest
+    image: ghcr.io/mrmoep/portmetrics:0.2.0   # oder :latest
     ports:
       - "8080:8080"
     env_file: .env

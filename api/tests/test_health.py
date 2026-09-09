@@ -17,7 +17,7 @@ def test_health() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert "env" in body
-    assert body["version"] == "0.1.0"
+    assert body["version"] == "0.2.0"
 
 
 def test_api_version() -> None:
@@ -25,7 +25,7 @@ def test_api_version() -> None:
     response = client.get("/api/version")
     assert response.status_code == 200
     body = response.json()
-    assert body["version"] == "0.1.0"
+    assert body["version"] == "0.2.0"
     assert body["repository"] == "https://github.com/MrMoep/PortMetrics"
 
 
@@ -114,5 +114,47 @@ def test_staging_list_empty(engine) -> None:
         response = client.get("/api/staging")
         assert response.status_code == 200
         assert response.json() == {"count": 0, "items": []}
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_webhook_requires_secret_configured(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(paperless_webhook_secret=None),
+    )
+
+    def override_db():
+        yield MagicMock()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post("/api/webhooks/paperless", json={"document_id": 1})
+        assert response.status_code == 503
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_webhook_rejects_bad_secret(monkeypatch) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(paperless_webhook_secret="correct"),
+    )
+
+    def override_db():
+        yield MagicMock()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/webhooks/paperless",
+            json={"document_id": 1},
+            headers={"X-PortMetrics-Secret": "wrong"},
+        )
+        assert response.status_code == 401
     finally:
         app.dependency_overrides.clear()

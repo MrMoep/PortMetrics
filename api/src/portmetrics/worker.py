@@ -73,7 +73,7 @@ def cmd_sync_paperless() -> int:
     client = PaperlessClient(settings.paperless_url, settings.paperless_token)
     try:
         with session_scope(engine) as session:
-            result = sync_paperless_documents(session, client, tag=settings.paperless_tag)
+            result = sync_paperless_documents(session, client)
     except PaperlessError as exc:
         print(f"paperless sync failed: {exc}", file=sys.stderr)
         return 1

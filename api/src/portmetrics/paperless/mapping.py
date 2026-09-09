@@ -1,0 +1,161 @@
+"""Semantic Paperless custom-field roles and persisted settings."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from portmetrics.config import settings
+from portmetrics.db.models import AppSetting
+from portmetrics.paperless.client import PaperlessClient, PaperlessError
+
+PAPERLESS_SETTINGS_KEY = "paperless"
+
+# PortMetrics roles → legacy Paperless field names (backward compatible default).
+DEFAULT_ROLE_TO_NAME: dict[str, str] = {
+    "type": "wp_typ",
+    "isin": "isin",
+    "symbol": "symbol",
+    "quantity": "stueckzahl",
+    "unit_price": "kurs",
+    "fee": "gebuehr",
+    "trade_date": "handelsdatum",
+    "currency": "waehrung",
+    "import_status": "gf_import_status",
+    "activity_id": "gf_activity_id",
+}
+
+FIELD_ROLES: tuple[str, ...] = tuple(DEFAULT_ROLE_TO_NAME.keys())
+REQUIRED_ROLES: tuple[str, ...] = ("quantity", "unit_price", "trade_date")
+
+
+def empty_paperless_settings() -> dict[str, Any]:
+    return {
+        "field_map": {},  # role → paperless field id
+        "tag": settings.paperless_tag,
+        "ghostfolio_default_account_id": settings.ghostfolio_default_account_id,
+        "ghostfolio_data_source": settings.ghostfolio_data_source,
+    }
+
+
+def get_paperless_settings(session: Session) -> dict[str, Any]:
+    row = session.get(AppSetting, PAPERLESS_SETTINGS_KEY)
+    base = empty_paperless_settings()
+    if row is None or not isinstance(row.value, dict):
+        return base
+    merged = dict(base)
+    merged.update(row.value)
+    field_map = merged.get("field_map") or {}
+    if not isinstance(field_map, dict):
+        field_map = {}
+    # Normalize ids to int
+    merged["field_map"] = {
+        str(role): int(field_id)
+        for role, field_id in field_map.items()
+        if role in FIELD_ROLES and field_id is not None and str(field_id).strip() != ""
+    }
+    tag = merged.get("tag")
+    merged["tag"] = (str(tag).strip() or None) if tag is not None else None
+    account = merged.get("ghostfolio_default_account_id")
+    merged["ghostfolio_default_account_id"] = (
+        str(account).strip() or None if account is not None else None
+    )
+    source = merged.get("ghostfolio_data_source") or settings.ghostfolio_data_source
+    merged["ghostfolio_data_source"] = str(source).strip() or settings.ghostfolio_data_source
+    return merged
+
+
+def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    current = get_paperless_settings(session)
+    field_map_in = payload.get("field_map", current["field_map"])
+    if not isinstance(field_map_in, dict):
+        raise ValueError("field_map must be an object")
+
+    field_map: dict[str, int] = {}
+    for role, field_id in field_map_in.items():
+        role_key = str(role)
+        if role_key not in FIELD_ROLES:
+            raise ValueError(f"Unknown field role: {role_key}")
+        if field_id is None or field_id == "":
+            continue
+        field_map[role_key] = int(field_id)
+
+    tag = payload.get("tag", current["tag"])
+    account = payload.get(
+        "ghostfolio_default_account_id",
+        current["ghostfolio_default_account_id"],
+    )
+    data_source = payload.get("ghostfolio_data_source", current["ghostfolio_data_source"])
+
+    value = {
+        "field_map": field_map,
+        "tag": (str(tag).strip() or None) if tag is not None else None,
+        "ghostfolio_default_account_id": (
+            str(account).strip() or None if account is not None else None
+        ),
+        "ghostfolio_data_source": (
+            str(data_source).strip() or settings.ghostfolio_data_source
+            if data_source is not None
+            else settings.ghostfolio_data_source
+        ),
+    }
+    row = session.get(AppSetting, PAPERLESS_SETTINGS_KEY)
+    if row is None:
+        row = AppSetting(key=PAPERLESS_SETTINGS_KEY, value=value)
+        session.add(row)
+    else:
+        row.value = value
+    session.flush()
+    return get_paperless_settings(session)
+
+
+def resolve_role_field_map(
+    session: Session,
+    client: PaperlessClient,
+) -> dict[str, int]:
+    """Return role → Paperless field id; fall back to legacy names if unset."""
+    stored = get_paperless_settings(session)["field_map"]
+    if stored:
+        return dict(stored)
+
+    name_to_id = client.custom_field_map()
+    resolved: dict[str, int] = {}
+    for role, name in DEFAULT_ROLE_TO_NAME.items():
+        field_id = name_to_id.get(name)
+        if field_id is not None:
+            resolved[role] = field_id
+    return resolved
+
+
+def extract_fields_by_roles(
+    document: dict[str, Any],
+    role_to_field_id: dict[str, int],
+) -> dict[str, Any]:
+    """Map document custom_fields → {role: value}."""
+    id_to_role = {field_id: role for role, field_id in role_to_field_id.items()}
+    result: dict[str, Any] = {}
+    for item in document.get("custom_fields") or []:
+        field_id = item.get("field")
+        if field_id is None:
+            continue
+        role = id_to_role.get(int(field_id))
+        if role:
+            result[role] = item.get("value")
+    return result
+
+
+def ensure_required_roles(role_to_field_id: dict[str, int]) -> None:
+    missing = [role for role in REQUIRED_ROLES if role not in role_to_field_id]
+    has_symbol = "isin" in role_to_field_id or "symbol" in role_to_field_id
+    if not has_symbol:
+        missing.append("isin|symbol")
+    if missing:
+        raise PaperlessError(
+            "Paperless field mapping incomplete (roles): " + ", ".join(missing)
+        )
+
+
+def list_settings_rows(session: Session) -> list[AppSetting]:
+    return list(session.scalars(select(AppSetting)).all())

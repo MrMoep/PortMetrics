@@ -1,3 +1,4 @@
+import secrets
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,6 +13,11 @@ def normalize_database_url(url: str) -> str:
     if url.startswith("postgres://"):
         return "postgresql+psycopg://" + url.removeprefix("postgres://")
     return url
+
+
+def parse_cors_origins(value: str) -> list[str]:
+    """Split a comma-separated CORS_ORIGINS value into trimmed origins."""
+    return [origin.strip() for origin in value.split(",") if origin.strip()]
 
 
 class Settings(BaseSettings):
@@ -36,6 +42,12 @@ class Settings(BaseSettings):
     ghostfolio_default_account_id: str | None = None
     ghostfolio_data_source: str = "YAHOO"
     paperless_tag: str | None = None  # optional: only sync docs with this tag name
+    # Shared secret for POST /api/webhooks/paperless (header X-PortMetrics-Secret)
+    paperless_webhook_secret: str | None = None
+    # 0 = disabled; catch-up pull into staging_imports
+    paperless_sync_interval_minutes: int = 0
+    # Comma-separated browser origins, e.g. https://portmetric.mrcarott.de
+    cors_origins: str = ""
 
     @property
     def effective_database_url(self) -> str:
@@ -43,6 +55,16 @@ class Settings(BaseSettings):
         if self.app_env in {"test", "development"} and self.test_database_url:
             return normalize_database_url(self.test_database_url)
         return normalize_database_url(self.database_url)
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return parse_cors_origins(self.cors_origins)
+
+
+def webhook_secret_matches(provided: str | None, expected: str | None) -> bool:
+    if not expected or not provided:
+        return False
+    return secrets.compare_digest(provided, expected)
 
 
 @lru_cache

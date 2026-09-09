@@ -217,3 +217,19 @@ class SyncState(Base):
     cursor: Mapped[str | None] = mapped_column(Text)
     checksum: Mapped[str | None] = mapped_column(Text)
     meta: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class AppSetting(Base):
+    """Key/value UI settings (JSON). Secrets stay in env."""
+
+    __tablename__ = "app_settings"
+    __table_args__ = {"schema": SCHEMA}
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

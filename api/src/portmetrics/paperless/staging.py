@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -11,14 +12,16 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from portmetrics.config import settings
 from portmetrics.db.models import DocumentLink, StagingImport
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
-from portmetrics.paperless.client import (
-    CUSTOM_FIELD_NAMES,
-    PaperlessClient,
-    PaperlessError,
-    extract_custom_fields,
+from portmetrics.paperless.client import PaperlessClient, PaperlessError
+from portmetrics.paperless.mapping import (
+    DEFAULT_ROLE_TO_NAME,
+    FIELD_ROLES,
+    ensure_required_roles,
+    extract_fields_by_roles,
+    get_paperless_settings,
+    resolve_role_field_map,
 )
 
 PAPERLESS_SOURCE = "paperless"
@@ -33,6 +36,14 @@ class StagingSyncResult:
     scanned: int
     upserted: int
     skipped: int
+
+
+@dataclass(frozen=True)
+class DocumentIngestResult:
+    document_id: int
+    action: str  # upserted | skipped | error
+    reason: str | None = None
+    staging_id: int | None = None
 
 
 def _as_decimal(value: Any, default: str = "0") -> Decimal:
@@ -57,31 +68,87 @@ def build_staging_payload(
     document: dict[str, Any],
     fields: dict[str, Any],
 ) -> dict[str, Any]:
-    isin = (fields.get("isin") or "").strip() or None
-    symbol = (fields.get("symbol") or "").strip() or isin
+    """Build staging payload from role-keyed fields (or legacy name-keyed)."""
+    roles = _normalize_to_roles(fields)
+    isin = (roles.get("isin") or "").strip() or None
+    symbol = (roles.get("symbol") or "").strip() or isin
     if not symbol:
         raise ValueError("Document missing symbol/isin custom field")
-    wp_typ = (fields.get("wp_typ") or "BUY").strip().upper()
+    wp_typ = (roles.get("type") or "BUY").strip().upper()
     if wp_typ not in {"BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"}:
         raise ValueError(f"Unsupported wp_typ: {wp_typ}")
-    handelsdatum = fields.get("handelsdatum")
-    if not handelsdatum:
-        raise ValueError("Document missing handelsdatum")
+    trade_date = roles.get("trade_date")
+    if not trade_date:
+        raise ValueError("Document missing trade_date")
     return {
         "paperless_doc_id": int(document["id"]),
         "title": document.get("title"),
         "wp_typ": wp_typ,
         "isin": isin,
         "symbol": symbol,
-        "quantity": str(_as_decimal(fields.get("stueckzahl"))),
-        "unit_price": str(_as_decimal(fields.get("kurs"))),
-        "fee": str(_as_decimal(fields.get("gebuehr"), "0")),
-        "currency": (fields.get("waehrung") or "EUR").strip().upper()[:3],
-        "trade_date": _as_date(handelsdatum).isoformat(),
-        "gf_import_status": fields.get("gf_import_status"),
-        "gf_activity_id": fields.get("gf_activity_id"),
-        "raw_fields": {name: fields.get(name) for name in CUSTOM_FIELD_NAMES},
+        "quantity": str(_as_decimal(roles.get("quantity"))),
+        "unit_price": str(_as_decimal(roles.get("unit_price"))),
+        "fee": str(_as_decimal(roles.get("fee"), "0")),
+        "currency": (roles.get("currency") or "EUR").strip().upper()[:3],
+        "trade_date": _as_date(trade_date).isoformat(),
+        "gf_import_status": roles.get("import_status"),
+        "gf_activity_id": roles.get("activity_id"),
+        "raw_fields": {role: roles.get(role) for role in FIELD_ROLES},
     }
+
+
+def _normalize_to_roles(fields: dict[str, Any]) -> dict[str, Any]:
+    """Accept role keys or legacy Paperless names."""
+    role_only = {"type", "quantity", "unit_price", "trade_date", "import_status", "activity_id"}
+    legacy_only = {
+        "wp_typ",
+        "stueckzahl",
+        "kurs",
+        "gebuehr",
+        "handelsdatum",
+        "waehrung",
+        "gf_import_status",
+        "gf_activity_id",
+    }
+    if any(key in fields for key in role_only):
+        return {role: fields.get(role) for role in FIELD_ROLES}
+    if any(key in fields for key in legacy_only):
+        return {role: fields.get(name) for role, name in DEFAULT_ROLE_TO_NAME.items()}
+    return {role: fields.get(role) for role in FIELD_ROLES}
+
+
+def _upsert_document_from_fields(
+    session: Session,
+    document: dict[str, Any],
+    fields: dict[str, Any],
+) -> DocumentIngestResult:
+    doc_id = int(document["id"])
+    status_hint = str(fields.get("import_status") or "").strip().lower()
+    if status_hint == STATUS_IMPORTED and fields.get("activity_id"):
+        return DocumentIngestResult(doc_id, "skipped", "already imported in Paperless")
+    if not fields.get("isin") and not fields.get("symbol"):
+        return DocumentIngestResult(doc_id, "skipped", "missing isin/symbol")
+    try:
+        payload = build_staging_payload(document, fields)
+    except ValueError as exc:
+        return DocumentIngestResult(doc_id, "skipped", str(exc))
+
+    row = session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == doc_id))
+    if row and row.status == STATUS_IMPORTED:
+        return DocumentIngestResult(doc_id, "skipped", "already imported locally", row.id)
+    if row is None:
+        row = StagingImport(paperless_doc_id=doc_id, payload=payload, status=STATUS_PENDING)
+        session.add(row)
+        session.flush()
+    else:
+        row.payload = payload
+        if row.status == STATUS_REJECTED:
+            pass
+        elif row.status != STATUS_IMPORTED:
+            row.status = STATUS_PENDING
+            row.error = None
+        session.flush()
+    return DocumentIngestResult(doc_id, "upserted", staging_id=row.id)
 
 
 def sync_paperless_documents(
@@ -90,50 +157,80 @@ def sync_paperless_documents(
     *,
     tag: str | None = None,
 ) -> StagingSyncResult:
-    field_map = client.custom_field_map()
-    required = ("isin", "stueckzahl", "kurs", "handelsdatum")
-    missing = [name for name in required if name not in field_map]
-    if missing:
-        raise PaperlessError("Paperless custom fields missing: " + ", ".join(missing))
+    role_map = resolve_role_field_map(session, client)
+    ensure_required_roles(role_map)
+    paperless_settings = get_paperless_settings(session)
+    resolved_tag = tag if tag is not None else paperless_settings.get("tag")
 
-    documents = client.list_documents(tag=tag)
+    documents = client.list_documents(tag=resolved_tag)
     upserted = 0
     skipped = 0
     for document in documents:
-        fields = extract_custom_fields(document, field_map)
-        status_hint = str(fields.get("gf_import_status") or "").strip().lower()
-        if status_hint == STATUS_IMPORTED and fields.get("gf_activity_id"):
-            skipped += 1
-            continue
-        if not fields.get("isin") and not fields.get("symbol"):
-            skipped += 1
-            continue
-        try:
-            payload = build_staging_payload(document, fields)
-        except ValueError:
-            skipped += 1
-            continue
-
-        doc_id = int(document["id"])
-        row = session.scalar(
-            select(StagingImport).where(StagingImport.paperless_doc_id == doc_id)
-        )
-        if row and row.status == STATUS_IMPORTED:
-            skipped += 1
-            continue
-        if row is None:
-            row = StagingImport(paperless_doc_id=doc_id, payload=payload, status=STATUS_PENDING)
-            session.add(row)
+        fields = extract_fields_by_roles(document, role_map)
+        result = _upsert_document_from_fields(session, document, fields)
+        if result.action == "upserted":
+            upserted += 1
         else:
-            row.payload = payload
-            if row.status == STATUS_REJECTED:
-                pass
-            elif row.status != STATUS_IMPORTED:
-                row.status = STATUS_PENDING
-                row.error = None
-        upserted += 1
+            skipped += 1
     session.flush()
     return StagingSyncResult(scanned=len(documents), upserted=upserted, skipped=skipped)
+
+
+def ingest_paperless_document(
+    session: Session,
+    client: PaperlessClient,
+    document_id: int,
+) -> DocumentIngestResult:
+    """Fetch one Paperless document and upsert into staging_imports."""
+    role_map = resolve_role_field_map(session, client)
+    ensure_required_roles(role_map)
+    document = client.get_document(document_id)
+    fields = extract_fields_by_roles(document, role_map)
+    result = _upsert_document_from_fields(session, document, fields)
+    session.flush()
+    return result
+
+
+def parse_paperless_document_id(payload: Any) -> int | None:
+    """Extract document id from webhook JSON / form-like payloads."""
+    if payload is None:
+        return None
+    if isinstance(payload, int):
+        return payload
+    if isinstance(payload, str):
+        text = payload.strip()
+        if text.isdigit():
+            return int(text)
+        return _document_id_from_url(text)
+    if not isinstance(payload, dict):
+        return None
+
+    for key in ("document_id", "doc_id", "id", "DOCUMENT_ID"):
+        raw = payload.get(key)
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            parsed = _document_id_from_url(str(raw))
+            if parsed is not None:
+                return parsed
+
+    for key in ("doc_url", "document_url", "url"):
+        parsed = _document_id_from_url(str(payload.get(key) or ""))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _document_id_from_url(url: str) -> int | None:
+    match = re.search(r"/documents/(\d+)", url)
+    if match:
+        return int(match.group(1))
+    match = re.search(r"/api/documents/(\d+)", url)
+    if match:
+        return int(match.group(1))
+    return None
 
 
 def list_staging(
@@ -185,11 +282,16 @@ def confirm_staging(
     if row.status == STATUS_IMPORTED:
         return _serialize_staging(row)
 
+    paperless_settings = get_paperless_settings(session)
     payload = dict(row.payload or {})
-    resolved_account = account_id or settings.ghostfolio_default_account_id
+    resolved_account = (
+        account_id
+        or paperless_settings.get("ghostfolio_default_account_id")
+    )
+    data_source = paperless_settings.get("ghostfolio_data_source") or "YAHOO"
     activity = {
         "currency": payload["currency"],
-        "dataSource": settings.ghostfolio_data_source,
+        "dataSource": data_source,
         "date": f"{payload['trade_date']}T00:00:00.000Z",
         "fee": float(payload["fee"]),
         "quantity": float(payload["quantity"]),
@@ -229,13 +331,19 @@ def confirm_staging(
 
     if paperless is not None:
         try:
-            paperless.patch_document_custom_fields(
-                row.paperless_doc_id,
-                {
-                    "gf_import_status": STATUS_IMPORTED,
-                    "gf_activity_id": str(activity_id) if activity_id else "",
-                },
-            )
+            role_map = resolve_role_field_map(session, paperless)
+            values_by_id: dict[int, Any] = {}
+            if "import_status" in role_map:
+                values_by_id[role_map["import_status"]] = STATUS_IMPORTED
+            if "activity_id" in role_map:
+                values_by_id[role_map["activity_id"]] = (
+                    str(activity_id) if activity_id else ""
+                )
+            if values_by_id:
+                paperless.patch_document_custom_fields(
+                    row.paperless_doc_id,
+                    values_by_field_id=values_by_id,
+                )
         except PaperlessError as exc:
             row.error = f"imported but paperless update failed: {exc}"
 

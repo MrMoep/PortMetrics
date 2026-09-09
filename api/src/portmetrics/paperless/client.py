@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-# Custom field names expected in Paperless (create once in Admin / UI).
+# Legacy custom field names (used when no UI mapping is stored).
 CUSTOM_FIELD_NAMES = (
     "wp_typ",
     "isin",
@@ -103,21 +103,27 @@ class PaperlessClient:
     def patch_document_custom_fields(
         self,
         document_id: int,
-        values_by_name: dict[str, Any],
+        values_by_name: dict[str, Any] | None = None,
+        *,
+        values_by_field_id: dict[int, Any] | None = None,
     ) -> dict[str, Any]:
-        """Merge named custom field values onto an existing document."""
-        field_map = self.custom_field_map()
+        """Merge custom field values onto an existing document (by name and/or id)."""
         document = self.get_document(document_id)
         existing = {
             int(item["field"]): item.get("value")
             for item in (document.get("custom_fields") or [])
             if item.get("field") is not None
         }
-        for name, value in values_by_name.items():
-            field_id = field_map.get(name)
-            if field_id is None:
-                raise PaperlessError(f"Paperless custom field '{name}' is not defined")
-            existing[field_id] = value
+        if values_by_field_id:
+            for field_id, value in values_by_field_id.items():
+                existing[int(field_id)] = value
+        if values_by_name:
+            field_map = self.custom_field_map()
+            for name, value in values_by_name.items():
+                field_id = field_map.get(name)
+                if field_id is None:
+                    raise PaperlessError(f"Paperless custom field '{name}' is not defined")
+                existing[field_id] = value
         payload = {
             "custom_fields": [
                 {"field": field_id, "value": value} for field_id, value in existing.items()
@@ -137,7 +143,7 @@ def extract_custom_fields(
     document: dict[str, Any],
     field_id_by_name: dict[str, int],
 ) -> dict[str, Any]:
-    """Map Paperless custom_fields list → {name: value}."""
+    """Map Paperless custom_fields list → {name: value} (legacy helper)."""
     id_to_name = {field_id: name for name, field_id in field_id_by_name.items()}
     result: dict[str, Any] = {}
     for item in document.get("custom_fields") or []:

@@ -57,6 +57,24 @@ export type VersionInfo = {
   repository: string;
 };
 
+export type PaperlessField = {
+  id: number;
+  name: string | null;
+  data_type?: string | null;
+};
+
+export type PaperlessSettings = {
+  roles: string[];
+  field_map: Record<string, number>;
+  tag: string | null;
+  ghostfolio_default_account_id: string | null;
+  ghostfolio_data_source: string;
+  paperless_configured: boolean;
+  webhook_secret_configured: boolean;
+  webhook_path: string;
+  paperless_sync_interval_minutes: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -86,6 +104,24 @@ export const api = {
     request<StagingItem>(`/api/staging/${id}/confirm`, { method: "POST" }),
   stagingReject: (id: number) =>
     request<StagingItem>(`/api/staging/${id}/reject`, { method: "POST" }),
+  paperlessSettings: () => request<PaperlessSettings>("/api/settings/paperless"),
+  savePaperlessSettings: (body: {
+    field_map: Record<string, number | null>;
+    tag?: string | null;
+    ghostfolio_default_account_id?: string | null;
+    ghostfolio_data_source?: string;
+  }) =>
+    request<PaperlessSettings>("/api/settings/paperless", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  paperlessCustomFields: () =>
+    request<{ fields: PaperlessField[] }>("/api/settings/paperless/custom-fields"),
+  testPaperless: () =>
+    request<{ ok: boolean; custom_field_count: number; url: string | null }>(
+      "/api/settings/paperless/test",
+      { method: "POST" },
+    ),
   simulateSell: (body: {
     isin: string;
     quantity: string;

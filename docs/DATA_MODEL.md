@@ -1,6 +1,6 @@
 # Datenmodell
 
-PostgreSQL-Schema: `portmetrics` (Stand Release **0.1.0**).
+PostgreSQL-Schema: `portmetrics` (Stand Release **0.2.0**).
 
 Migrationen: `api/alembic/versions/` — lokal/Prod mit `alembic upgrade head`.
 
@@ -70,6 +70,7 @@ Verkauf → verbrauchte Lots.
 | `metrics_daily` | Vorberechnete KPIs (nav, invested, mtd_return, ytd_return, …) |
 | `document_links` | Paperless-Dokument ↔ Activity/Lot |
 | `staging_imports` | Review-Queue vor Ghostfolio-Import |
+| `app_settings` | UI-Settings (z. B. Paperless Field-Map) |
 | `sync_state` | Idempotenz, last_sync_at, cursor |
 
 ## FIFO-Algorithmus
