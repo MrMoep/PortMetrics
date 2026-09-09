@@ -22,7 +22,7 @@ _scheduler: BackgroundScheduler | None = None
 
 def job_sync_and_rebuild() -> None:
     if not settings.ghostfolio_url or not settings.ghostfolio_access_token:
-        logger.debug("Skipping scheduled sync: Ghostfolio not configured")
+        logger.info("Skipping scheduled sync: Ghostfolio not configured")
         return
     engine = get_engine()
     client = GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)

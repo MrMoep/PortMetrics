@@ -128,6 +128,40 @@ def test_auth_failure_raises() -> None:
         client.authenticate()
 
 
+def test_import_activities() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/anonymous"):
+            return httpx.Response(200, json={"authToken": "jwt"})
+        if request.url.path.endswith("/import"):
+            assert request.headers["Authorization"] == "Bearer jwt"
+            return httpx.Response(
+                201,
+                json={"activities": [{"id": "11111111-1111-1111-1111-111111111111"}]},
+            )
+        raise AssertionError(request.url.path)
+
+    client = GhostfolioClient(
+        "http://ghostfolio.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = client.import_activities(
+        [
+            {
+                "currency": "EUR",
+                "dataSource": "YAHOO",
+                "date": "2024-01-01T00:00:00.000Z",
+                "fee": 0,
+                "quantity": 1,
+                "symbol": "VWCE.DE",
+                "type": "BUY",
+                "unitPrice": 100,
+            }
+        ]
+    )
+    assert result["activities"][0]["id"].startswith("11111111")
+
+
 def test_unused_json_roundtrip(sample_activity_payload: dict) -> None:
     # sanity: payload remains JSON-serializable for fixtures
     assert json.loads(json.dumps(sample_activity_payload))["type"] == "BUY"

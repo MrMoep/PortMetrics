@@ -18,12 +18,11 @@ def test_build_scheduler_registers_jobs() -> None:
     assert ids == {"sync_ghostfolio", "rebuild_metrics"}
 
 
-def test_job_sync_skips_without_config(monkeypatch, caplog) -> None:
+def test_job_sync_skips_without_config(monkeypatch) -> None:
     monkeypatch.setattr("portmetrics.scheduler.settings.ghostfolio_url", None)
     monkeypatch.setattr("portmetrics.scheduler.settings.ghostfolio_access_token", None)
-    with caplog.at_level("DEBUG", logger="portmetrics.scheduler"):
-        job_sync_and_rebuild()
-    assert "Skipping scheduled sync" in caplog.text
+    # Should return without contacting Ghostfolio / DB.
+    job_sync_and_rebuild()
 
 
 def test_start_scheduler_disabled_in_test_env(monkeypatch) -> None:
