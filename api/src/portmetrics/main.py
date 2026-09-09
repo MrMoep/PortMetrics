@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from portmetrics import __version__
 from portmetrics.config import settings
 from portmetrics.db.models import Activity, SyncState
 from portmetrics.db.session import get_session_factory
@@ -50,7 +51,7 @@ async def lifespan(_app: FastAPI):
         stop_scheduler()
 
 
-app = FastAPI(title="PortMetrics", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="PortMetrics", version=__version__, lifespan=lifespan)
 
 WEB_DIST = Path(settings.web_dist_dir)
 
@@ -70,12 +71,21 @@ def get_db() -> Generator[Session]:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "env": settings.app_env}
+    return {"status": "ok", "env": settings.app_env, "version": __version__}
 
 
 @app.get("/api/health")
 def api_health() -> dict[str, str]:
     return health()
+
+
+@app.get("/api/version")
+def api_version() -> dict[str, str]:
+    return {
+        "name": "PortMetrics",
+        "version": __version__,
+        "repository": "https://github.com/MrMoep/PortMetrics",
+    }
 
 
 @app.get("/api/sync/status")

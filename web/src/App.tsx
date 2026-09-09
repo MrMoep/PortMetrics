@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api, Lot, Overview, StagingItem } from "./api";
+import { api, Lot, Overview, StagingItem, VersionInfo } from "./api";
 
 type Tab = "overview" | "lots" | "positions" | "simulator" | "staging";
+
+const FALLBACK_VERSION: VersionInfo = {
+  name: "PortMetrics",
+  version: "0.1.0",
+  repository: "https://github.com/MrMoep/PortMetrics",
+};
 
 function pct(value: string | null | undefined): string {
   if (value == null) return "—";
@@ -25,18 +31,21 @@ export default function App() {
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null);
+  const [version, setVersion] = useState<VersionInfo>(FALLBACK_VERSION);
 
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [ov, lotData, stagingData] = await Promise.all([
+      const [ov, lotData, stagingData, versionInfo] = await Promise.all([
         api.overview(),
         api.lots(),
         api.staging(),
+        api.version().catch(() => FALLBACK_VERSION),
       ]);
       setOverview(ov);
       setLots(lotData.lots);
       setStaging(stagingData.items);
+      setVersion(versionInfo);
       setStatus(`Stand ${ov.as_of}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -83,7 +92,19 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <h1>PortMetrics</h1>
-          <p>FIFO-Lots, Perioden-Rendite, Verkaufs-Simulator</p>
+          <p>
+            FIFO-Lots, Perioden-Rendite, Verkaufs-Simulator
+            {" · "}
+            <a
+              className="version-link"
+              href={version.repository}
+              target="_blank"
+              rel="noreferrer"
+              title="GitHub Repository"
+            >
+              v{version.version}
+            </a>
+          </p>
         </div>
         <div className="actions">
           <button type="button" onClick={() => void runAction("Sync", api.sync)}>

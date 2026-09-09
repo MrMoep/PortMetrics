@@ -1,5 +1,7 @@
 # PortMetrics
 
+**Version 0.1.0** · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/MrMoep/PortMetrics)
+
 Self-hosted Portfolio-Analytics für Homelab-Umgebungen. PortMetrics erweitert [Ghostfolio](https://ghostfol.io) um FIFO-Lot-Tracking, Perioden-Renditen und steuerrelevante Auswertungen — mit optionaler Anbindung an [Paperless NGX](https://docs.paperless-ngx.com/) für Wertpapierbelege.
 
 ## Warum PortMetrics?
@@ -29,28 +31,43 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 
 **Source of Truth:** Ghostfolio = kanonische Transaktionshistorie. PostgreSQL = abgeleitete Analytics. Paperless = Belegarchiv + Import-Staging.
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+| Dokument | Inhalt |
+|----------|--------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Komponenten, Datenfluss, Single Container |
+| [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | PostgreSQL-Schema, FIFO |
+| [docs/API.md](docs/API.md) | REST-Endpunkte |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Unraid / Docker / Image-Tags |
+| [docs/PAPERLESS.md](docs/PAPERLESS.md) | Custom Fields & Staging-Workflow |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Branches, lokal testen, CI |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Phasen & Future |
 
 ## Tech-Stack
 
 | Schicht | Technologie |
 |---------|-------------|
 | Datenbank | PostgreSQL 18 (`portmetrics` / `portmetrics_test`, extern) |
-| App | Python 3.12, FastAPI (API + SPA + Hintergrund-Jobs) |
+| App | Python 3.12, FastAPI (API + SPA + APScheduler) |
 | FIFO Engine | Python (deterministisch, unit-testbar) |
-| Frontend | React, Vite, TanStack Table (Phase 4; Single Container) |
-| Deployment | **Ein** Docker-Image (`ghcr.io/…/portmetrics`), gebaut auf `main` |
+| Frontend | React 19, Vite |
+| Deployment | Ein Docker-Image `ghcr.io/mrmoep/portmetrics` |
 
-## Branches & CI
+## Quick Start (Produktion)
 
+```yaml
+services:
+  portmetrics:
+    image: ghcr.io/mrmoep/portmetrics:0.1.0
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - /mnt/user/appdata/portmetrics/logs:/app/logs
+    restart: unless-stopped
 ```
-feature/* → PR → dev → PR → main
-                 Tests        Tests + Image-Build
-```
 
-Details: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+Vorher: DB anlegen, `alembic upgrade head`, `.env` aus [`.env.example`](.env.example). Details: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-Lokal (ohne Image-Build):
+## Lokal entwickeln
 
 ```powershell
 cd api
@@ -58,24 +75,31 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest
+uvicorn portmetrics.main:app --reload --port 8080
 ```
 
-## Roadmap
+Branches & CI: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
-Die Umsetzung ist in Phasen gegliedert — siehe [GitHub Issues](https://github.com/MrMoep/PortMetrics/issues) und [docs/ROADMAP.md](docs/ROADMAP.md).
+```
+feature/* → PR → dev → PR → main → Image (GHCR) + Release-Tags
+```
 
-| Phase | Fokus |
-|-------|-------|
-| 0 | Ghostfolio → PostgreSQL Sync |
-| 1 | FIFO Engine + Verkaufs-Simulator |
-| 2 | Perioden-Metriken (30T, MTD, YTD, CAGR) |
-| 3 | Paperless-Integration |
-| 4 | Dashboard v1 |
-| Future | IRR, Freibetrag-Tracker, Drawdown, … |
+## Status (0.1.0)
 
-## Status
+| Phase | Fokus | Stand |
+|-------|-------|-------|
+| 0 | Ghostfolio → PostgreSQL Sync | ✅ |
+| 1 | FIFO Engine + Verkaufs-Simulator | ✅ |
+| 2 | Perioden-Metriken | ✅ |
+| 3 | Paperless-Integration | ✅ |
+| 4 | Dashboard v1 | ✅ |
+| Future | IRR, Freibetrag, Drawdown, … | offen (#7–#14) |
 
-Phasen 0–4 auf `dev` (Sync, FIFO, Metriken, Dashboard, Paperless-Staging). Single-Container inkl. APScheduler und Log-Volume. Paperless: [docs/PAPERLESS.md](docs/PAPERLESS.md).
+Im Dashboard erscheint **v0.1.0** unter dem Titel; Klick öffnet das GitHub-Repo.
+
+## Hinweis
+
+PortMetrics liefert **Steuer-Schätzungen**, keine Steuererklärung.
 
 ## Lizenz
 

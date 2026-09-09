@@ -17,6 +17,16 @@ def test_health() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert "env" in body
+    assert body["version"] == "0.1.0"
+
+
+def test_api_version() -> None:
+    client = TestClient(app)
+    response = client.get("/api/version")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"] == "0.1.0"
+    assert body["repository"] == "https://github.com/MrMoep/PortMetrics"
 
 
 def test_api_health() -> None:
