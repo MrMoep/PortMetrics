@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -23,7 +24,9 @@ from portmetrics.paperless.mapping import (
     ensure_required_roles,
     extract_fields_by_roles,
     get_paperless_settings,
+    has_sync_filters,
     resolve_role_field_map,
+    sync_filter_ids,
 )
 
 PAPERLESS_SOURCE = "paperless"
@@ -49,6 +52,8 @@ class StagingSyncResult:
     scanned: int
     upserted: int
     skipped: int
+    mode: str = "partial"
+    filters_active: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,24 @@ class DocumentIngestResult:
     action: str  # upserted | skipped | error
     reason: str | None = None
     staging_id: int | None = None
+
+
+SYNC_MODE_PARTIAL = "partial"
+SYNC_MODE_FULL = "full"
+FULL_SYNC_REQUEST_TIMEOUT = 120.0
+
+
+def resolve_legacy_tag_id(client: PaperlessClient, tag_name: str | None) -> list[int]:
+    if not tag_name:
+        return []
+    needle = tag_name.strip().lower()
+    if not needle:
+        return []
+    for tag in client.list_tags():
+        name = str(tag.get("name") or "").strip().lower()
+        if name == needle and tag.get("id") is not None:
+            return [int(tag["id"])]
+    return []
 
 
 def _as_decimal(value: Any, default: str | None = "0") -> Decimal:
@@ -263,26 +286,72 @@ def sync_paperless_documents(
     session: Session,
     client: PaperlessClient,
     *,
+    mode: str = SYNC_MODE_PARTIAL,
     tag: str | None = None,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> StagingSyncResult:
+    """Pull Paperless docs into staging.
+
+    ``partial``: newest page only (≤100), filter optional, no warning.
+    ``full``: all matching pages; caller should warn when no filters are set.
+    """
+    resolved_mode = (mode or SYNC_MODE_PARTIAL).strip().lower()
+    if resolved_mode not in {SYNC_MODE_PARTIAL, SYNC_MODE_FULL}:
+        raise ValueError(f"Unknown sync mode: {mode}")
+
     role_map = resolve_role_field_map(session, client)
     ensure_required_roles(role_map)
     paperless_settings = get_paperless_settings(session)
-    resolved_tag = tag if tag is not None else paperless_settings.get("tag")
+    tag_ids, type_ids = sync_filter_ids(paperless_settings)
+    legacy_tag = tag if tag is not None else paperless_settings.get("tag")
+    if not tag_ids and legacy_tag:
+        tag_ids = resolve_legacy_tag_id(client, str(legacy_tag))
 
-    documents = client.list_documents(tag=resolved_tag)
+    filters_active = bool(tag_ids or type_ids)
+    paginate = resolved_mode == SYNC_MODE_FULL
+    request_timeout = FULL_SYNC_REQUEST_TIMEOUT if paginate else None
+
+    def _progress(event: dict[str, Any]) -> None:
+        if on_progress:
+            on_progress(event)
+
+    documents = client.list_documents(
+        page_size=100,
+        tag_ids=tag_ids or None,
+        document_type_ids=type_ids or None,
+        tag=None if tag_ids else (str(legacy_tag) if legacy_tag else None),
+        paginate=paginate,
+        request_timeout=request_timeout,
+        on_progress=_progress,
+    )
     upserted = 0
     skipped = 0
-    for document in documents:
+    for index, document in enumerate(documents, start=1):
         fields = extract_fields_by_roles(document, role_map)
         result = _upsert_document_from_fields(session, document, fields)
         if result.action == "upserted":
             upserted += 1
         else:
             skipped += 1
+        if on_progress and (index % 10 == 0 or index == len(documents)):
+            on_progress(
+                {
+                    "event": "ingest",
+                    "processed": index,
+                    "total": len(documents),
+                    "upserted": upserted,
+                    "skipped": skipped,
+                }
+            )
     session.flush()
     backfill_from_staging(session)
-    return StagingSyncResult(scanned=len(documents), upserted=upserted, skipped=skipped)
+    return StagingSyncResult(
+        scanned=len(documents),
+        upserted=upserted,
+        skipped=skipped,
+        mode=resolved_mode,
+        filters_active=filters_active or has_sync_filters(paperless_settings),
+    )
 
 
 def ingest_paperless_document(
