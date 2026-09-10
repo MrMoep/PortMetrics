@@ -5,6 +5,7 @@ import {
   Overview,
   PaperlessField,
   PaperlessSettings,
+  PortfolioSettings,
   StagingItem,
   VersionInfo,
 } from "./api";
@@ -186,11 +187,15 @@ export default function App() {
   const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null);
   const [version, setVersion] = useState<VersionInfo>(FALLBACK_VERSION);
   const [paperlessSettings, setPaperlessSettings] = useState<PaperlessSettings | null>(null);
+  const [portfolioSettings, setPortfolioSettings] = useState<PortfolioSettings | null>(null);
   const [customFields, setCustomFields] = useState<PaperlessField[]>([]);
   const [fieldMapDraft, setFieldMapDraft] = useState<Record<string, string>>({});
   const [tagDraft, setTagDraft] = useState("");
   const [accountDraft, setAccountDraft] = useState("");
   const [dataSourceDraft, setDataSourceDraft] = useState("YAHOO");
+  const [allowanceDraft, setAllowanceDraft] = useState("1000");
+  const [warnPctDraft, setWarnPctDraft] = useState("0.85");
+  const [riskFreeDraft, setRiskFreeDraft] = useState("0");
 
   const refresh = useCallback(async () => {
     setError("");
@@ -214,8 +219,12 @@ export default function App() {
   const loadSettings = useCallback(async () => {
     setError("");
     try {
-      const cfg = await api.paperlessSettings();
+      const [cfg, portfolio] = await Promise.all([
+        api.paperlessSettings(),
+        api.portfolioSettings(),
+      ]);
       setPaperlessSettings(cfg);
+      setPortfolioSettings(portfolio);
       const draft: Record<string, string> = {};
       for (const role of cfg.roles) {
         draft[role] = cfg.field_map[role] != null ? String(cfg.field_map[role]) : "";
@@ -224,6 +233,9 @@ export default function App() {
       setTagDraft(cfg.tag ?? "");
       setAccountDraft(cfg.ghostfolio_default_account_id ?? "");
       setDataSourceDraft(cfg.ghostfolio_data_source || "YAHOO");
+      setAllowanceDraft(portfolio.tax_allowance_eur);
+      setWarnPctDraft(portfolio.tax_warn_pct);
+      setRiskFreeDraft(portfolio.risk_free_rate);
       if (cfg.paperless_configured) {
         try {
           const fields = await api.paperlessCustomFields();
@@ -289,14 +301,23 @@ export default function App() {
       for (const [role, raw] of Object.entries(fieldMapDraft)) {
         field_map[role] = raw.trim() === "" ? null : Number(raw);
       }
-      const saved = await api.savePaperlessSettings({
-        field_map,
-        tag: tagDraft.trim() || null,
-        ghostfolio_default_account_id: accountDraft.trim() || null,
-        ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
-      });
+      const [saved, portfolio] = await Promise.all([
+        api.savePaperlessSettings({
+          field_map,
+          tag: tagDraft.trim() || null,
+          ghostfolio_default_account_id: accountDraft.trim() || null,
+          ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
+        }),
+        api.savePortfolioSettings({
+          tax_allowance_eur: allowanceDraft.trim() || "1000",
+          tax_warn_pct: warnPctDraft.trim() || "0.85",
+          risk_free_rate: riskFreeDraft.trim() || "0",
+        }),
+      ]);
       setPaperlessSettings(saved);
+      setPortfolioSettings(portfolio);
       setStatus("Einstellungen gespeichert");
+      await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("");
@@ -438,10 +459,53 @@ export default function App() {
                 </strong>
               </div>
               <div className="stat">
+                <span>IRR (MWR)</span>
+                <strong className={`mono ${signedClass(overview.mwr?.irr)}`}>
+                  {pct(overview.mwr?.irr)}
+                </strong>
+              </div>
+              <div className="stat">
+                <span>Einfache Rendite</span>
+                <strong className={`mono ${signedClass(overview.mwr?.simple_return)}`}>
+                  {pct(overview.mwr?.simple_return)}
+                </strong>
+              </div>
+              <div className="stat">
+                <span>Max Drawdown</span>
+                <strong className={`mono ${signedClass(overview.risk?.max_drawdown)}`}>
+                  {pct(overview.risk?.max_drawdown)}
+                </strong>
+              </div>
+              <div className="stat">
+                <span>Volatilität</span>
+                <strong className="mono">{pct(overview.risk?.volatility)}</strong>
+              </div>
+              <div className="stat">
+                <span>Sharpe</span>
+                <strong className={`mono ${signedClass(overview.risk?.sharpe)}`}>
+                  {overview.risk?.sharpe == null ? "—" : Number(overview.risk.sharpe).toFixed(2)}
+                </strong>
+              </div>
+              <div className="stat">
+                <span>Freibetrag rest ({overview.tax_allowance?.year ?? "—"})</span>
+                <strong
+                  className={`mono ${overview.tax_allowance?.warn ? "val-neg" : signedClass(overview.tax_allowance?.remaining)}`}
+                >
+                  {money(overview.tax_allowance?.remaining)}
+                </strong>
+              </div>
+              <div className="stat">
                 <span>Dividenden</span>
                 <strong className="mono">{money(overview.dividends.total)}</strong>
               </div>
             </div>
+            {overview.tax_allowance?.warn ? (
+              <p className="status error" style={{ marginTop: "0.75rem" }}>
+                Freibetrag zu {pct(overview.tax_allowance.used_pct)} ausgeschöpft (Warnschwelle{" "}
+                {pct(overview.tax_allowance.warn_pct)}) — realisiert YTD{" "}
+                {money(overview.tax_allowance.realized_ytd)} / {money(overview.tax_allowance.allowance)}.
+              </p>
+            ) : null}
           </Panel>
           <Panel label="Perioden-Rendite" offset>
             <div className="table-wrap">
@@ -469,6 +533,28 @@ export default function App() {
               </table>
             </div>
           </Panel>
+          {overview.cashflows && overview.cashflows.length > 0 ? (
+            <Panel label="Cashflow-Timeline" meta={`${overview.cashflows.length} FLOWS`} offset>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Datum</th>
+                      <th>Betrag</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.cashflows.map((cf, idx) => (
+                      <tr key={`${cf.date}-${idx}`}>
+                        <td className="mono">{cf.date}</td>
+                        <td className={`mono ${signedClass(cf.amount)}`}>{money(cf.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          ) : null}
         </div>
       )}
 
@@ -522,6 +608,8 @@ export default function App() {
                   <th>Investiert</th>
                   <th>Marktwert</th>
                   <th>Einfache Rendite</th>
+                  <th>IRR</th>
+                  <th>Max DD</th>
                 </tr>
               </thead>
               <tbody>
@@ -533,6 +621,10 @@ export default function App() {
                     <td className="mono">{money(p.market_value)}</td>
                     <td className={`mono ${signedClass(p.simple_return)}`}>
                       {pct(p.simple_return)}
+                    </td>
+                    <td className={`mono ${signedClass(p.irr)}`}>{pct(p.irr)}</td>
+                    <td className={`mono ${signedClass(p.max_drawdown)}`}>
+                      {pct(p.max_drawdown)}
                     </td>
                   </tr>
                 ))}
@@ -680,6 +772,15 @@ export default function App() {
               ))}
             </div>
           </Panel>
+          <Panel label="Portfolio / Steuer & Risiko">
+            <p className="muted">
+              Freibetrag und risikofreier Zins für Sharpe. Werte sind Schätzungen — keine Steuerberatung.
+              Speichern unten speichert Paperless- und Portfolio-Settings gemeinsam
+              {portfolioSettings
+                ? ` (aktuell Freibetrag ${portfolioSettings.tax_allowance_eur} EUR).`
+                : "."}
+            </p>
+          </Panel>
           <Panel label="Einstellungen / Paperless">
             <p className="muted">
               Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. URL/Token/Webhook-Secret bleiben
@@ -705,6 +806,30 @@ export default function App() {
               </p>
             )}
             <form className="form form-wide" onSubmit={(e) => void onSaveSettings(e)}>
+              <label>
+                Steuer-Freibetrag (EUR / Jahr)
+                <input
+                  value={allowanceDraft}
+                  onChange={(e) => setAllowanceDraft(e.target.value)}
+                  placeholder="1000"
+                />
+              </label>
+              <label>
+                Warnschwelle (0–1, z.B. 0.85 = 85%)
+                <input
+                  value={warnPctDraft}
+                  onChange={(e) => setWarnPctDraft(e.target.value)}
+                  placeholder="0.85"
+                />
+              </label>
+              <label>
+                Risikofreier Zins (annualisiert, z.B. 0.02)
+                <input
+                  value={riskFreeDraft}
+                  onChange={(e) => setRiskFreeDraft(e.target.value)}
+                  placeholder="0"
+                />
+              </label>
               <div className="settings-actions">
                 <button type="button" onClick={() => void onTestPaperless()}>
                   Verbindung testen
