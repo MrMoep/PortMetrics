@@ -61,6 +61,7 @@ export type Lot = {
   wkn?: string | null;
   isin_code?: string | null;
   display_id?: string;
+  paperless_doc_id?: number | null;
   open_qty: string;
   unit_cost: string;
   open_date: string;

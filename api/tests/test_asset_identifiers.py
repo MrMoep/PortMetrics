@@ -75,6 +75,29 @@ def test_upsert_isin_wkn_and_lots_display(db_session: Session) -> None:
 
     save_portfolio_settings(db_session, {"asset_id_preference": "symbol"})
     assert list_open_lots(db_session)[0]["display_id"] == "VWCE.DE"
+    assert list_open_lots(db_session)[0]["paperless_doc_id"] == 42
+
+
+def test_lot_paperless_from_activity_comment(db_session: Session) -> None:
+    row = Activity(
+        gf_activity_id=uuid4(),
+        account_id="acc",
+        isin="IE00BK5BQT80",
+        symbol="VWCE.DE",
+        type="BUY",
+        quantity=Decimal("5"),
+        unit_price=Decimal("90"),
+        fee=Decimal("0"),
+        currency="EUR",
+        trade_date=date(2024, 2, 1),
+        comment="paperless:99 isin=IE00BK5BQT80",
+    )
+    db_session.add(row)
+    db_session.flush()
+    rebuild_lots(db_session)
+    lots = list_open_lots(db_session)
+    assert len(lots) == 1
+    assert lots[0]["paperless_doc_id"] == 99
 
 
 def test_backfill_from_staging(db_session: Session) -> None:

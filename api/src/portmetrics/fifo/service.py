@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
-from portmetrics.assets.identifiers import enrich_asset_fields, wkn_map
-from portmetrics.db.models import Activity, Lot, LotConsumption, LotStatus, PriceSnapshot
+from portmetrics.assets.identifiers import enrich_asset_fields, paperless_doc_map, wkn_map
+from portmetrics.db.models import (
+    Activity,
+    DocumentLink,
+    Lot,
+    LotConsumption,
+    LotStatus,
+    PriceSnapshot,
+)
 from portmetrics.fifo.engine import (
     FifoError,
     LotState,
@@ -18,6 +26,8 @@ from portmetrics.fifo.engine import (
     estimate_tax,
 )
 from portmetrics.settings.portfolio import get_portfolio_settings
+
+_PAPERLESS_COMMENT_RE = re.compile(r"paperless:(\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -133,6 +143,62 @@ def latest_mark_price(session: Session, asset_key: str) -> Decimal | None:
     return Decimal(activity.unit_price)
 
 
+def _paperless_doc_from_comment(comment: str | None) -> int | None:
+    if not comment:
+        return None
+    match = _PAPERLESS_COMMENT_RE.search(comment)
+    return int(match.group(1)) if match else None
+
+
+def _lot_paperless_docs(
+    session: Session,
+    lots: list[Lot],
+    activities: dict[int, Activity],
+) -> dict[int, int]:
+    """Resolve paperless_doc_id per lot: DocumentLink → comment → asset map."""
+    if not lots:
+        return {}
+
+    lot_ids = {lot.id for lot in lots}
+    activity_ids = {lot.activity_id for lot in lots}
+    by_lot: dict[int, int] = {}
+    by_activity: dict[int, int] = {}
+
+    links = session.scalars(
+        select(DocumentLink).where(
+            or_(
+                DocumentLink.lot_id.in_(lot_ids),
+                DocumentLink.activity_id.in_(activity_ids),
+            )
+        )
+    ).all()
+    for link in links:
+        if link.lot_id is not None and link.lot_id in lot_ids:
+            by_lot[link.lot_id] = int(link.paperless_doc_id)
+        if link.activity_id is not None:
+            by_activity[link.activity_id] = int(link.paperless_doc_id)
+
+    doc_by_isin = paperless_doc_map(session)
+    resolved: dict[int, int] = {}
+    for lot in lots:
+        doc_id = by_lot.get(lot.id) or by_activity.get(lot.activity_id)
+        if doc_id is None:
+            activity = activities.get(lot.activity_id)
+            doc_id = _paperless_doc_from_comment(activity.comment if activity else None)
+        if doc_id is None:
+            activity = activities.get(lot.activity_id)
+            for key in (
+                activity.isin if activity else None,
+                lot.isin,
+            ):
+                if key and key in doc_by_isin:
+                    doc_id = doc_by_isin[key]
+                    break
+        if doc_id is not None:
+            resolved[lot.id] = doc_id
+    return resolved
+
+
 def list_open_lots(
     session: Session,
     *,
@@ -150,6 +216,7 @@ def list_open_lots(
         for row in session.scalars(select(Activity).where(Activity.id.in_(activity_ids))).all()
     } if activity_ids else {}
     wkn_by_isin = wkn_map(session)
+    paperless_by_lot = _lot_paperless_docs(session, rows, activities)
     preference = get_portfolio_settings(session)["asset_id_preference"]
     out: list[dict] = []
     for lot in rows:
@@ -188,6 +255,7 @@ def list_open_lots(
                 "wkn": ids["wkn"],
                 "isin_code": ids["isin_code"],
                 "display_id": ids["display_id"],
+                "paperless_doc_id": paperless_by_lot.get(lot.id),
                 "open_qty": str(lot.open_qty),
                 "original_qty": str(lot.original_qty),
                 "cost_basis": str(lot.cost_basis),

@@ -21,6 +21,7 @@ from portmetrics.paperless.staging import (
     STATUS_REJECTED,
     build_staging_payload,
     confirm_staging,
+    list_staging,
     parse_monetary,
     reject_staging,
     sync_paperless_documents,
@@ -377,3 +378,62 @@ def test_ingest_paperless_document(db_session) -> None:
     row = db_session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == 77))
     assert row is not None
     assert row.status == STATUS_PENDING
+
+
+def test_reingest_skips_imported_and_rejected(db_session) -> None:
+    from portmetrics.paperless.staging import ingest_paperless_document
+
+    imported = StagingImport(
+        paperless_doc_id=10,
+        payload=build_staging_payload(_doc(10), extract_custom_fields(_doc(10), FIELD_MAP)),
+        status=STATUS_IMPORTED,
+    )
+    rejected = StagingImport(
+        paperless_doc_id=11,
+        payload=build_staging_payload(_doc(11), extract_custom_fields(_doc(11), FIELD_MAP)),
+        status=STATUS_REJECTED,
+    )
+    pending = StagingImport(
+        paperless_doc_id=12,
+        payload=build_staging_payload(_doc(12), extract_custom_fields(_doc(12), FIELD_MAP)),
+        status=STATUS_PENDING,
+    )
+    db_session.add_all([imported, rejected, pending])
+    db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handled = _fields_handler(request)
+        if handled:
+            return handled
+        for doc_id in (10, 11, 12):
+            if request.url.path.endswith(f"/documents/{doc_id}/"):
+                return httpx.Response(200, json=_doc(doc_id))
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+
+    skip_imported = ingest_paperless_document(db_session, client, 10)
+    skip_rejected = ingest_paperless_document(db_session, client, 11)
+    upsert_pending = ingest_paperless_document(db_session, client, 12)
+
+    assert skip_imported.action == "skipped"
+    assert "imported" in (skip_imported.reason or "")
+    assert skip_rejected.action == "skipped"
+    assert "rejected" in (skip_rejected.reason or "")
+    assert upsert_pending.action == "upserted"
+
+    db_session.refresh(imported)
+    db_session.refresh(rejected)
+    assert imported.status == STATUS_IMPORTED
+    assert rejected.status == STATUS_REJECTED
+
+    all_items = list_staging(db_session, status="all")
+    open_items = list_staging(db_session)
+    pending_items = list_staging(db_session, status=STATUS_PENDING)
+    assert {item["paperless_doc_id"] for item in all_items} == {10, 11, 12}
+    assert {item["paperless_doc_id"] for item in open_items} == {12}
+    assert {item["paperless_doc_id"] for item in pending_items} == {12}

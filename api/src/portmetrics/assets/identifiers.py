@@ -80,6 +80,14 @@ def wkn_map(session: Session) -> dict[str, str]:
     return {row.isin: row.wkn for row in rows}
 
 
+def paperless_doc_map(session: Session) -> dict[str, int]:
+    """ISIN → latest known Paperless document id from asset_identifiers."""
+    rows = session.scalars(
+        select(AssetIdentifier).where(AssetIdentifier.paperless_doc_id.is_not(None))
+    ).all()
+    return {row.isin: int(row.paperless_doc_id) for row in rows if row.paperless_doc_id is not None}
+
+
 def resolve_isin_code(
     *,
     activity_isin: str | None,
