@@ -10,6 +10,34 @@ export type Overview = {
     period_return: string | null;
   }>;
   cagr: { cagr: string | null; years: string | null };
+  mwr?: {
+    irr: string | null;
+    simple_return: string | null;
+    start_date: string | null;
+    end_date: string;
+    cashflow_count: number;
+    terminal_nav: string;
+  };
+  cashflows?: Array<{ date: string; amount: string }>;
+  risk?: {
+    max_drawdown: string | null;
+    peak_date: string | null;
+    trough_date: string | null;
+    volatility: string | null;
+    sharpe: string | null;
+    risk_free_rate: string;
+    observations: number;
+  };
+  tax_allowance?: {
+    year: number;
+    allowance: string;
+    realized_ytd: string;
+    taxable_ytd: string;
+    remaining: string;
+    used_pct: string;
+    warn: boolean;
+    warn_pct: string;
+  };
   dividends: { total: string };
   positions: Array<{
     isin: string;
@@ -17,6 +45,8 @@ export type Overview = {
     invested: string;
     market_value: string;
     simple_return: string | null;
+    irr?: string | null;
+    max_drawdown?: string | null;
   }>;
 };
 
@@ -79,6 +109,12 @@ export type PaperlessSettings = {
   paperless_sync_interval_minutes: number;
 };
 
+export type PortfolioSettings = {
+  tax_allowance_eur: string;
+  tax_warn_pct: string;
+  risk_free_rate: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -116,6 +152,16 @@ export const api = {
     ghostfolio_data_source?: string;
   }) =>
     request<PaperlessSettings>("/api/settings/paperless", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  portfolioSettings: () => request<PortfolioSettings>("/api/settings/portfolio"),
+  savePortfolioSettings: (body: {
+    tax_allowance_eur?: string;
+    tax_warn_pct?: string;
+    risk_free_rate?: string;
+  }) =>
+    request<PortfolioSettings>("/api/settings/portfolio", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

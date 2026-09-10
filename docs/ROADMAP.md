@@ -31,16 +31,18 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 
 ## Future / nach 0.2
 
-| Issue | Beschreibung | Priorität |
-|-------|--------------|-----------|
-| [#7](https://github.com/MrMoep/PortMetrics/issues/7) | IRR / Geldgewichtete Rendite | P2 |
-| [#8](https://github.com/MrMoep/PortMetrics/issues/8) | Steuer-Freibetrag Tracker | P2 |
-| [#9](https://github.com/MrMoep/PortMetrics/issues/9) | Drawdown / Volatilität | P2 |
-| [#10](https://github.com/MrMoep/PortMetrics/issues/10) | Sektor-Allokation (Ghostfolio einbetten) | P2 |
-| [#11](https://github.com/MrMoep/PortMetrics/issues/11) | Edge Cases (Splits, Überträge, Währung) | P2 |
-| [#12](https://github.com/MrMoep/PortMetrics/issues/12) | Alerts & Benachrichtigungen | P3 |
-| [#13](https://github.com/MrMoep/PortMetrics/issues/13) | Multi-User / Multi-Portfolio | P3 |
-| [#14](https://github.com/MrMoep/PortMetrics/issues/14) | Export (CSV/PDF) für Steuerberater | P3 |
+| Issue | Beschreibung | Priorität | Stand |
+|-------|--------------|-----------|-------|
+| [#7](https://github.com/MrMoep/PortMetrics/issues/7) | IRR / Geldgewichtete Rendite | P2 | ✅ (dev) |
+| [#8](https://github.com/MrMoep/PortMetrics/issues/8) | Steuer-Freibetrag Tracker | P2 | ✅ (dev) |
+| [#9](https://github.com/MrMoep/PortMetrics/issues/9) | Drawdown / Volatilität | P2 | ✅ (dev) |
+| [#10](https://github.com/MrMoep/PortMetrics/issues/10) | Sektor-Allokation (Ghostfolio einbetten) | P2 | |
+| [#11](https://github.com/MrMoep/PortMetrics/issues/11) | Edge Cases (Splits, Überträge, Währung) | P2 | |
+| [#12](https://github.com/MrMoep/PortMetrics/issues/12) | Alerts & Benachrichtigungen | P3 | |
+| [#13](https://github.com/MrMoep/PortMetrics/issues/13) | Multi-User / Multi-Portfolio | P3 | |
+| [#14](https://github.com/MrMoep/PortMetrics/issues/14) | Export (CSV/PDF) für Steuerberater | P3 | |
+
+Price-Sync-Grundlage: Ghostfolio → `price_snapshots` (PR #40).
 
 ## v0.1 Must-Have Kennzahlen
 

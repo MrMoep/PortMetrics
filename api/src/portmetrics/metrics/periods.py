@@ -357,17 +357,32 @@ def rebuild_metrics_daily(session: Session, *, end: date | None = None) -> int:
 
 
 def overview_payload(session: Session, as_of: date | None = None) -> dict:
+    from decimal import Decimal as D
+
+    from portmetrics.metrics.irr import cashflow_timeline, irr_payload
+    from portmetrics.metrics.risk import position_drawdown, risk_payload
+    from portmetrics.metrics.tax_allowance import tax_allowance_payload
+    from portmetrics.settings.portfolio import get_portfolio_settings
+
     activities = load_activities(session)
     prices = price_map(session)
     end = as_of or date.today()
     periods = compute_standard_periods(activities, prices, as_of=end)
     nav = nav_as_of(activities, prices, end) if activities else ZERO
     contrib, withdr = (
-        cashflows_between(activities, activities[0].trade_date, end)
-        if activities
-        else (ZERO, ZERO)
+        cashflows_between(activities, activities[0].trade_date, end) if activities else (ZERO, ZERO)
     )
     invested = contrib - withdr
+    portfolio_cfg = get_portfolio_settings(session)
+    risk_free = D(portfolio_cfg["risk_free_rate"])
+    mwr = irr_payload(activities, prices, as_of=end)
+    positions = position_simple_return(session)
+    for row in positions:
+        key = row["isin"]
+        row["irr"] = irr_payload(activities, prices, as_of=end, asset_key=key).get("irr")
+        row["max_drawdown"] = position_drawdown(activities, prices, key, as_of=end).get(
+            "max_drawdown"
+        )
     return {
         "as_of": end.isoformat(),
         "nav": str(nav),
@@ -387,6 +402,10 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
             for p in periods
         ],
         "cagr": cagr(activities, prices, end=end),
+        "mwr": mwr,
+        "cashflows": cashflow_timeline(activities),
+        "risk": risk_payload(activities, prices, as_of=end, risk_free_rate=risk_free),
+        "tax_allowance": tax_allowance_payload(session, as_of=end),
         "dividends": dividend_summary(activities),
-        "positions": position_simple_return(session),
+        "positions": positions,
     }

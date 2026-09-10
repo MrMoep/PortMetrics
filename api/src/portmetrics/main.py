@@ -47,6 +47,7 @@ from portmetrics.paperless.staging import (
     sync_paperless_documents,
 )
 from portmetrics.scheduler import start_scheduler, stop_scheduler
+from portmetrics.settings.portfolio import get_portfolio_settings, save_portfolio_settings
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
 from portmetrics.sync.prices import (
     GHOSTFOLIO_PRICES_SOURCE,
@@ -345,6 +346,19 @@ def settings_paperless_put(payload: dict, db: Session = Depends(get_db)) -> dict
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _paperless_settings_payload(cfg)
+
+
+@app.get("/api/settings/portfolio")
+def settings_portfolio_get(db: Session = Depends(get_db)) -> dict:
+    return get_portfolio_settings(db)
+
+
+@app.put("/api/settings/portfolio")
+def settings_portfolio_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        return save_portfolio_settings(db, payload)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/settings/paperless/custom-fields")
