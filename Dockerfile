@@ -33,6 +33,9 @@ RUN pip install /app/api
 
 COPY --from=web-build /web/dist /app/web/dist
 
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 WORKDIR /app/api
 EXPOSE 8080
-CMD ["uvicorn", "portmetrics.main:app", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["/entrypoint.sh"]
