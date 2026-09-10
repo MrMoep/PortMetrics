@@ -66,7 +66,7 @@ services:
     restart: unless-stopped
 ```
 
-Vorher: DB anlegen, `alembic upgrade head`, `.env` aus [`.env.example`](.env.example). Details: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Vorher: DB anlegen, `.env` aus [`.env.example`](.env.example). Schema-Migrationen laufen beim Container-Start automatisch. Details: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Lokal entwickeln
 
