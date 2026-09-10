@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from portmetrics.db.models import DocumentLink, StagingImport
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
-from portmetrics.paperless.client import PaperlessClient, PaperlessError
+from portmetrics.paperless.client import PaperlessClient
 from portmetrics.paperless.mapping import (
     DEFAULT_ROLE_TO_NAME,
     FIELD_ROLES,
