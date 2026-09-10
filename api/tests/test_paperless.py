@@ -157,6 +157,23 @@ def test_paperless_list_documents_and_fields() -> None:
     assert len(client.list_documents()) == 1
 
 
+def test_list_tags_and_document_types() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/tags/"):
+            return httpx.Response(200, json={"results": [{"id": 1, "name": "wp"}]})
+        if request.url.path.endswith("/document_types/"):
+            return httpx.Response(200, json=[{"id": 2, "name": "Trade"}])
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    assert client.list_tags()[0]["id"] == 1
+    assert client.list_document_types()[0]["name"] == "Trade"
+
+
 def test_list_documents_paginates_and_filters(db_session) -> None:
     pages = {"n": 0}
 
@@ -167,17 +184,23 @@ def test_list_documents_paginates_and_filters(db_session) -> None:
             return httpx.Response(200, json={"results": [{"id": 3, "name": "Abrechnung"}]})
         if request.url.path.endswith("/documents/"):
             params = request.url.params
-            assert params.get("document_type__id") == "3"
-            assert "9" in params.get_list("tags__id")
             pages["n"] += 1
             if pages["n"] == 1:
+                assert params.get("document_type__id") == "3"
+                assert "9" in params.get_list("tags__id")
                 return httpx.Response(
                     200,
                     json={
                         "results": [_doc(1), _doc(2)],
-                        "next": "http://paperless.test/api/documents/?page=2",
+                        "next": (
+                            "http://paperless.test/api/documents/"
+                            "?page=2&page_size=100&ordering=-created"
+                            "&tags__id=9&document_type__id=3"
+                        ),
                     },
                 )
+            assert params.get("page") == "2"
+            assert params.get("document_type__id") == "3"
             return httpx.Response(200, json={"results": [_doc(3)], "next": None})
         raise AssertionError(request.url.path)
 
@@ -211,8 +234,10 @@ def test_list_documents_paginates_and_filters(db_session) -> None:
     )
     cfg = get_paperless_settings(db_session)
     assert cfg["sync_tags"][0]["id"] == 9
-    assert cfg["tag"] is None or cfg["sync_tags"]
+    from portmetrics.paperless.mapping import has_sync_filters, sync_filter_ids
 
+    assert has_sync_filters(cfg) is True
+    assert sync_filter_ids(cfg) == ([9], [3])
 
 def test_sync_uses_legacy_name_fallback(db_session) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
