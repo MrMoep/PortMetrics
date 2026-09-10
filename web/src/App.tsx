@@ -571,70 +571,71 @@ export default function App() {
             <div className="grid">
               <div className="stat stat-hero" title={METRIC_HINTS.nav}>
                 <span>NAV</span>
-                <strong className="mono">{money(overview.nav)}</strong>
+                <strong className="mono">{money(overview.nav, showMode)}</strong>
               </div>
               <div className="stat" title={METRIC_HINTS.invested}>
                 <span>Investiert</span>
-                <strong className="mono">{money(overview.invested)}</strong>
+                <strong className="mono">{money(overview.invested, showMode)}</strong>
               </div>
               <div className="stat" title={METRIC_HINTS.unrealized}>
                 <span>Unrealisiert</span>
-                <strong className={`mono ${signedClass(overview.unrealized_gain)}`}>
-                  {money(overview.unrealized_gain)}
+                <strong className={`mono ${signedClass(overview.unrealized_gain, showMode)}`}>
+                  {money(overview.unrealized_gain, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.cagr}>
                 <span>CAGR</span>
-                <strong className={`mono ${signedClass(overview.cagr.cagr)}`}>
-                  {pct(overview.cagr.cagr)}
+                <strong className={`mono ${signedClass(overview.cagr.cagr, showMode)}`}>
+                  {pct(overview.cagr.cagr, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.irr}>
                 <span>IRR (MWR)</span>
-                <strong className={`mono ${signedClass(overview.mwr?.irr)}`}>
-                  {pct(overview.mwr?.irr)}
+                <strong className={`mono ${signedClass(overview.mwr?.irr, showMode)}`}>
+                  {pct(overview.mwr?.irr, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.simple}>
                 <span>Einfache Rendite</span>
-                <strong className={`mono ${signedClass(overview.mwr?.simple_return)}`}>
-                  {pct(overview.mwr?.simple_return)}
+                <strong className={`mono ${signedClass(overview.mwr?.simple_return, showMode)}`}>
+                  {pct(overview.mwr?.simple_return, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.maxdd}>
                 <span>Max Drawdown</span>
-                <strong className={`mono ${signedClass(overview.risk?.max_drawdown)}`}>
-                  {pct(overview.risk?.max_drawdown)}
+                <strong className={`mono ${signedClass(overview.risk?.max_drawdown, showMode)}`}>
+                  {pct(overview.risk?.max_drawdown, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.vol}>
                 <span>Volatilität</span>
-                <strong className="mono">{pct(overview.risk?.volatility)}</strong>
+                <strong className="mono">{pct(overview.risk?.volatility, showMode)}</strong>
               </div>
               <div className="stat" title={METRIC_HINTS.sharpe}>
                 <span>Sharpe</span>
-                <strong className={`mono ${signedClass(overview.risk?.sharpe)}`}>
-                  {overview.risk?.sharpe == null ? "—" : Number(overview.risk.sharpe).toFixed(2)}
+                <strong className={`mono ${signedClass(overview.risk?.sharpe, showMode)}`}>
+                  {ratio(overview.risk?.sharpe, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.tax}>
                 <span>Freibetrag rest ({overview.tax_allowance?.year ?? "—"})</span>
                 <strong
-                  className={`mono ${overview.tax_allowance?.warn ? "val-neg" : signedClass(overview.tax_allowance?.remaining)}`}
+                  className={`mono ${showMode ? "" : overview.tax_allowance?.warn ? "val-neg" : signedClass(overview.tax_allowance?.remaining)}`}
                 >
-                  {money(overview.tax_allowance?.remaining)}
+                  {money(overview.tax_allowance?.remaining, showMode)}
                 </strong>
               </div>
               <div className="stat" title={METRIC_HINTS.dividends}>
                 <span>Dividenden</span>
-                <strong className="mono">{money(overview.dividends.total)}</strong>
+                <strong className="mono">{money(overview.dividends.total, showMode)}</strong>
               </div>
             </div>
             {overview.tax_allowance?.warn ? (
               <p className="status error" style={{ marginTop: "0.75rem" }}>
-                Freibetrag zu {pct(overview.tax_allowance.used_pct)} ausgeschöpft (Warnschwelle{" "}
-                {pct(overview.tax_allowance.warn_pct)}) — realisiert YTD{" "}
-                {money(overview.tax_allowance.realized_ytd)} / {money(overview.tax_allowance.allowance)}.
+                Freibetrag zu {pct(overview.tax_allowance.used_pct, showMode)} ausgeschöpft (Warnschwelle{" "}
+                {pct(overview.tax_allowance.warn_pct, showMode)}) — realisiert YTD{" "}
+                {money(overview.tax_allowance.realized_ytd, showMode)} /{" "}
+                {money(overview.tax_allowance.allowance, showMode)}.
               </p>
             ) : null}
           </Panel>
@@ -655,8 +656,8 @@ export default function App() {
                       <td>{p.label}</td>
                       <td className="mono">{p.start_date}</td>
                       <td className="mono">{p.end_date}</td>
-                      <td className={`mono ${signedClass(p.period_return)}`}>
-                        {pct(p.period_return)}
+                      <td className={`mono ${signedClass(p.period_return, showMode)}`}>
+                        {pct(p.period_return, showMode)}
                       </td>
                     </tr>
                   ))}
@@ -688,7 +689,9 @@ export default function App() {
                     {sortRows(overview.cashflows, cashflowSort).map((cf, idx) => (
                       <tr key={`${cf.date}-${idx}`}>
                         <td className="mono">{cf.date}</td>
-                        <td className={`mono ${signedClass(cf.amount)}`}>{money(cf.amount)}</td>
+                        <td className={`mono ${signedClass(cf.amount, showMode)}`}>
+                          {money(cf.amount, showMode)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -761,14 +764,14 @@ export default function App() {
                     <td className="mono">{lot.isin}</td>
                     <td className="mono">{lot.open_date}</td>
                     <td>{lot.status}</td>
-                    <td className="mono">{lot.open_qty}</td>
-                    <td className="mono">{money(lot.unit_cost)}</td>
-                    <td className="mono">{money(lot.mark_price)}</td>
-                    <td className={`mono ${signedClass(lot.unrealized_gain)}`}>
-                      {money(lot.unrealized_gain)}
+                    <td className="mono">{qty(lot.open_qty, showMode)}</td>
+                    <td className="mono">{money(lot.unit_cost, showMode)}</td>
+                    <td className="mono">{money(lot.mark_price, showMode)}</td>
+                    <td className={`mono ${signedClass(lot.unrealized_gain, showMode)}`}>
+                      {money(lot.unrealized_gain, showMode)}
                     </td>
-                    <td className={`mono ${signedClass(lot.unrealized_gain_pct)}`}>
-                      {lot.unrealized_gain_pct == null ? "—" : `${lot.unrealized_gain_pct} %`}
+                    <td className={`mono ${signedClass(lot.unrealized_gain_pct, showMode)}`}>
+                      {pctPoints(lot.unrealized_gain_pct, showMode)}
                     </td>
                   </tr>
                 ))}
@@ -832,15 +835,17 @@ export default function App() {
                 {sortRows(overview.positions, positionsSort).map((p) => (
                   <tr key={p.isin}>
                     <td className="mono">{p.isin}</td>
-                    <td className="mono">{p.open_qty}</td>
-                    <td className="mono">{money(p.invested)}</td>
-                    <td className="mono">{money(p.market_value)}</td>
-                    <td className={`mono ${signedClass(p.simple_return)}`}>
-                      {pct(p.simple_return)}
+                    <td className="mono">{qty(p.open_qty, showMode)}</td>
+                    <td className="mono">{money(p.invested, showMode)}</td>
+                    <td className="mono">{money(p.market_value, showMode)}</td>
+                    <td className={`mono ${signedClass(p.simple_return, showMode)}`}>
+                      {pct(p.simple_return, showMode)}
                     </td>
-                    <td className={`mono ${signedClass(p.irr)}`}>{pct(p.irr)}</td>
-                    <td className={`mono ${signedClass(p.max_drawdown)}`}>
-                      {pct(p.max_drawdown)}
+                    <td className={`mono ${signedClass(p.irr, showMode)}`}>
+                      {pct(p.irr, showMode)}
+                    </td>
+                    <td className={`mono ${signedClass(p.max_drawdown, showMode)}`}>
+                      {pct(p.max_drawdown, showMode)}
                     </td>
                   </tr>
                 ))}
@@ -883,8 +888,8 @@ export default function App() {
                     <td>{item.status}</td>
                     <td>{item.payload.wp_typ ?? "—"}</td>
                     <td className="mono">{item.payload.isin ?? item.payload.symbol ?? "—"}</td>
-                    <td className="mono">{item.payload.quantity ?? "—"}</td>
-                    <td className="mono">{money(item.payload.unit_price)}</td>
+                    <td className="mono">{qty(item.payload.quantity, showMode)}</td>
+                    <td className="mono">{money(item.payload.unit_price, showMode)}</td>
                     <td className="mono">{item.payload.trade_date ?? "—"}</td>
                     <td className="row-actions">
                       <button
@@ -952,21 +957,27 @@ export default function App() {
               <div className="sim-result">
                 <p>
                   Realisierter Gewinn:{" "}
-                  <strong className={`mono ${signedClass(String(simResult.realized_gain))}`}>
-                    {money(String(simResult.realized_gain))}
+                  <strong className={`mono ${signedClass(String(simResult.realized_gain), showMode)}`}>
+                    {money(String(simResult.realized_gain), showMode)}
                   </strong>
                 </p>
                 <p>
                   Geschätzte Steuer:{" "}
-                  <strong className="mono">{money(String(simResult.estimated_tax))}</strong>
+                  <strong className="mono">
+                    {money(String(simResult.estimated_tax), showMode)}
+                  </strong>
                 </p>
                 <p>
                   Nach Steuer:{" "}
-                  <strong className={`mono ${signedClass(String(simResult.net_after_tax))}`}>
-                    {money(String(simResult.net_after_tax))}
+                  <strong className={`mono ${signedClass(String(simResult.net_after_tax), showMode)}`}>
+                    {money(String(simResult.net_after_tax), showMode)}
                   </strong>
                 </p>
-                <pre className="mono">{JSON.stringify(simResult.lots, null, 2)}</pre>
+                <pre className="mono">
+                  {showMode
+                    ? "[Show-Modus aktiv — Lot-Details ausgeblendet]"
+                    : JSON.stringify(simResult.lots, null, 2)}
+                </pre>
               </div>
             ) : (
               <p className="muted">Noch keine Simulation — Parameter links ausfüllen.</p>
@@ -1004,7 +1015,7 @@ export default function App() {
               Freibetrag und risikofreier Zins für Sharpe. Werte sind Schätzungen — keine Steuerberatung.
               Speichern unten speichert Paperless- und Portfolio-Settings gemeinsam
               {portfolioSettings
-                ? ` (aktuell Freibetrag ${portfolioSettings.tax_allowance_eur} EUR).`
+                ? ` (aktuell Freibetrag ${showMode ? "0,00" : portfolioSettings.tax_allowance_eur} EUR).`
                 : "."}
             </p>
           </Panel>
