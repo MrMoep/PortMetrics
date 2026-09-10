@@ -19,6 +19,7 @@ from portmetrics.paperless.staging import (
     STATUS_IMPORTED,
     STATUS_PENDING,
     STATUS_REJECTED,
+    SYNC_MODE_FULL,
     build_staging_payload,
     confirm_staging,
     list_staging,
@@ -238,6 +239,68 @@ def test_list_documents_paginates_and_filters(db_session) -> None:
 
     assert has_sync_filters(cfg) is True
     assert sync_filter_ids(cfg) == ([9], [3])
+
+
+def test_sync_full_mode_paginates_with_progress(db_session) -> None:
+    save_paperless_settings(
+        db_session,
+        {
+            "field_map": ROLE_MAP,
+            "sync_tags": [{"id": 9, "name": "wertpapier"}],
+        },
+    )
+    pages = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/custom_fields/"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 1, "name": "TradeType"},
+                        {"id": 2, "name": "ISIN"},
+                        {"id": 3, "name": "WKN"},
+                        {"id": 4, "name": "Qty"},
+                        {"id": 5, "name": "Price"},
+                        {"id": 6, "name": "Fee"},
+                    ]
+                },
+            )
+        if request.url.path.endswith("/documents/"):
+            pages["n"] += 1
+            if pages["n"] == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [_doc(101), _doc(102)],
+                        "next": "http://paperless.test/api/documents/?page=2",
+                    },
+                )
+            return httpx.Response(200, json={"results": [_doc(103)], "next": None})
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    events: list[dict] = []
+    result = sync_paperless_documents(
+        db_session,
+        client,
+        mode=SYNC_MODE_FULL,
+        on_progress=events.append,
+    )
+    assert result.mode == "full"
+    assert result.scanned == 3
+    assert result.upserted == 3
+    assert result.filters_active is True
+    assert pages["n"] == 2
+    assert any(e.get("event") == "page" for e in events)
+    assert any(e.get("event") == "ingest" for e in events)
+    rows = db_session.scalars(select(StagingImport)).all()
+    assert {row.paperless_doc_id for row in rows} == {101, 102, 103}
+
 
 def test_sync_uses_legacy_name_fallback(db_session) -> None:
     def handler(request: httpx.Request) -> httpx.Response:

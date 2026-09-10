@@ -1,24 +1,25 @@
 from __future__ import annotations
 
+from portmetrics import __version__
 from portmetrics.build_info import display_version
 
 
 def test_display_version_default(monkeypatch) -> None:
     monkeypatch.delenv("PORTMETRICS_CHANNEL", raising=False)
     monkeypatch.delenv("PORTMETRICS_BUILT_AT", raising=False)
-    assert display_version() == "0.2.0"
+    assert display_version() == __version__
 
 
 def test_display_version_dev_with_timestamp(monkeypatch) -> None:
     monkeypatch.setenv("PORTMETRICS_CHANNEL", "dev")
     monkeypatch.setenv("PORTMETRICS_BUILT_AT", "2026-09-09 23:18")
-    assert display_version() == "0.2.0-dev · 2026-09-09 23:18"
+    assert display_version() == f"{__version__}-dev · 2026-09-09 23:18"
 
 
 def test_display_version_dev_without_timestamp(monkeypatch) -> None:
     monkeypatch.setenv("PORTMETRICS_CHANNEL", "dev")
     monkeypatch.delenv("PORTMETRICS_BUILT_AT", raising=False)
-    assert display_version() == "0.2.0-dev"
+    assert display_version() == f"{__version__}-dev"
 
 
 def test_api_version_includes_build_metadata(monkeypatch) -> None:
@@ -32,8 +33,8 @@ def test_api_version_includes_build_metadata(monkeypatch) -> None:
 
     client = TestClient(app)
     body = client.get("/api/version").json()
-    assert body["version"] == "0.2.0-dev · 2026-09-09 23:18"
+    assert body["version"] == f"{__version__}-dev · 2026-09-09 23:18"
     assert body["channel"] == "dev"
     assert body["built_at"] == "2026-09-09 23:18"
     assert body["git_sha"] == "abc1234"
-    assert body["package_version"] == "0.2.0"
+    assert body["package_version"] == __version__
