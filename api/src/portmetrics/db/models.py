@@ -178,6 +178,26 @@ class DocumentLink(Base):
     link_type: Mapped[str] = mapped_column(Text, nullable=False, default="source")
 
 
+class AssetIdentifier(Base):
+    """ISIN → WKN map learned from Paperless documents that carry both."""
+
+    __tablename__ = "asset_identifiers"
+    __table_args__ = (
+        Index("ix_asset_identifiers_wkn", "wkn"),
+        {"schema": SCHEMA},
+    )
+
+    isin: Mapped[str] = mapped_column(Text, primary_key=True)
+    wkn: Mapped[str] = mapped_column(Text, nullable=False)
+    paperless_doc_id: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class StagingImport(Base):
     __tablename__ = "staging_imports"
     __table_args__ = (

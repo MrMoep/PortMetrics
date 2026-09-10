@@ -41,6 +41,10 @@ export type Overview = {
   dividends: { total: string };
   positions: Array<{
     isin: string;
+    symbol?: string | null;
+    wkn?: string | null;
+    isin_code?: string | null;
+    display_id?: string;
     open_qty: string;
     invested: string;
     market_value: string;
@@ -53,6 +57,10 @@ export type Overview = {
 export type Lot = {
   id: number;
   isin: string;
+  symbol?: string | null;
+  wkn?: string | null;
+  isin_code?: string | null;
+  display_id?: string;
   open_qty: string;
   unit_cost: string;
   open_date: string;
@@ -113,6 +121,8 @@ export type PaperlessSettings = {
   tag: string | null;
   ghostfolio_default_account_id: string | null;
   ghostfolio_data_source: string;
+  public_url?: string | null;
+  document_base_url?: string | null;
   paperless_configured: boolean;
   webhook_secret_configured: boolean;
   webhook_path: string;
@@ -124,6 +134,7 @@ export type PortfolioSettings = {
   tax_allowance_eur: string;
   tax_warn_pct: string;
   risk_free_rate: string;
+  asset_id_preference: "symbol" | "wkn" | "isin";
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -161,6 +172,7 @@ export const api = {
     tag?: string | null;
     ghostfolio_default_account_id?: string | null;
     ghostfolio_data_source?: string;
+    public_url?: string | null;
   }) =>
     request<PaperlessSettings>("/api/settings/paperless", {
       method: "PUT",
@@ -171,6 +183,7 @@ export const api = {
     tax_allowance_eur?: string;
     tax_warn_pct?: string;
     risk_free_rate?: string;
+    asset_id_preference?: "symbol" | "wkn" | "isin";
   }) =>
     request<PortfolioSettings>("/api/settings/portfolio", {
       method: "PUT",

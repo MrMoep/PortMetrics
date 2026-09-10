@@ -12,6 +12,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from portmetrics.assets.identifiers import backfill_from_staging, upsert_from_payload
 from portmetrics.db.models import DocumentLink, StagingImport
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.paperless.client import PaperlessClient
@@ -238,6 +239,8 @@ def _upsert_document_from_fields(
     except ValueError as exc:
         return DocumentIngestResult(doc_id, "skipped", str(exc))
 
+    upsert_from_payload(session, payload)
+
     row = session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == doc_id))
     if row and row.status == STATUS_IMPORTED:
         return DocumentIngestResult(doc_id, "skipped", "already imported locally", row.id)
@@ -278,6 +281,7 @@ def sync_paperless_documents(
         else:
             skipped += 1
     session.flush()
+    backfill_from_staging(session)
     return StagingSyncResult(scanned=len(documents), upserted=upserted, skipped=skipped)
 
 
@@ -392,6 +396,7 @@ def confirm_staging(
 
     paperless_settings = get_paperless_settings(session)
     payload = dict(row.payload or {})
+    upsert_from_payload(session, payload)
     wp_typ = str(payload.get("wp_typ") or "").upper()
     if wp_typ not in IMPORTABLE_TYPES:
         raise ValueError(

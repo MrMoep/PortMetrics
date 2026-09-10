@@ -153,6 +153,12 @@ function SortHeader({
   );
 }
 
+function assetIdColumnLabel(pref: string | null | undefined): string {
+  if (pref === "wkn") return "WKN";
+  if (pref === "isin") return "ISIN";
+  return "Symbol";
+}
+
 function Panel({
   label,
   meta,
@@ -309,9 +315,11 @@ export default function App() {
   const [tagDraft, setTagDraft] = useState("");
   const [accountDraft, setAccountDraft] = useState("");
   const [dataSourceDraft, setDataSourceDraft] = useState("YAHOO");
+  const [publicUrlDraft, setPublicUrlDraft] = useState("");
   const [allowanceDraft, setAllowanceDraft] = useState("1000");
   const [warnPctDraft, setWarnPctDraft] = useState("0.85");
   const [riskFreeDraft, setRiskFreeDraft] = useState("0");
+  const [assetIdPrefDraft, setAssetIdPrefDraft] = useState<"symbol" | "wkn" | "isin">("symbol");
   const [cashflowSort, setCashflowSort] = useState<SortState>({ key: "date", dir: "desc" });
   const [lotsSort, setLotsSort] = useState<SortState>({ key: "open_date", dir: "desc" });
   const [positionsSort, setPositionsSort] = useState<SortState>({ key: "invested", dir: "desc" });
@@ -321,16 +329,25 @@ export default function App() {
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [ov, lotData, stagingData, versionInfo] = await Promise.all([
+      const [ov, lotData, stagingData, versionInfo, portfolio, paperless] = await Promise.all([
         api.overview(),
         api.lots(),
         api.staging(),
         api.version().catch(() => FALLBACK_VERSION),
+        api.portfolioSettings().catch(() => null),
+        api.paperlessSettings().catch(() => null),
       ]);
       setOverview(ov);
       setLots(lotData.lots);
       setStaging(stagingData.items);
       setVersion(versionInfo);
+      if (portfolio) {
+        setPortfolioSettings(portfolio);
+        setAssetIdPrefDraft(portfolio.asset_id_preference || "symbol");
+      }
+      if (paperless) {
+        setPaperlessSettings(paperless);
+      }
       setStatus(`Stand ${ov.as_of}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -354,9 +371,11 @@ export default function App() {
       setTagDraft(cfg.tag ?? "");
       setAccountDraft(cfg.ghostfolio_default_account_id ?? "");
       setDataSourceDraft(cfg.ghostfolio_data_source || "YAHOO");
+      setPublicUrlDraft(cfg.public_url ?? "");
       setAllowanceDraft(portfolio.tax_allowance_eur);
       setWarnPctDraft(portfolio.tax_warn_pct);
       setRiskFreeDraft(portfolio.risk_free_rate);
+      setAssetIdPrefDraft(portfolio.asset_id_preference || "symbol");
       if (cfg.paperless_configured) {
         try {
           const fields = await api.paperlessCustomFields();
@@ -428,11 +447,13 @@ export default function App() {
           tag: tagDraft.trim() || null,
           ghostfolio_default_account_id: accountDraft.trim() || null,
           ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
+          public_url: publicUrlDraft.trim() || null,
         }),
         api.savePortfolioSettings({
           tax_allowance_eur: allowanceDraft.trim() || "1000",
           tax_warn_pct: warnPctDraft.trim() || "0.85",
           risk_free_rate: riskFreeDraft.trim() || "0",
+          asset_id_preference: assetIdPrefDraft,
         }),
       ]);
       setPaperlessSettings(saved);
@@ -500,29 +521,45 @@ export default function App() {
             </a>
           </p>
         </div>
-        <div className="ops-icons" role="toolbar" aria-label="Wartungsaktionen">
-          <button
-            type="button"
-            className={`icon-btn${showMode ? " active" : ""}`}
-            title={showMode ? "Show-Modus aus (Beträge sichtbar)" : "Show-Modus an (Beträge auf 0)"}
-            aria-label={showMode ? "Show-Modus deaktivieren" : "Show-Modus aktivieren"}
-            aria-pressed={showMode}
-            onClick={() => setShowMode((v) => !v)}
-          >
-            <Icon name={showMode ? "eye-off" : "eye"} />
-          </button>
-          {OPS_ACTIONS.map((action) => (
+        <div className="topbar-end">
+          <div className="topbar-status" role="status">
+            {status && <p className={`status ${error ? "" : "ok"}`}>{status}</p>}
+            {error && <p className="status error">{error}</p>}
+            {!status && !error && <p className="status">Bereit</p>}
+          </div>
+          <div className="ops-icons" role="toolbar" aria-label="Wartungsaktionen">
             <button
-              key={action.id}
               type="button"
               className="icon-btn"
-              title={action.label}
-              aria-label={action.label}
-              onClick={() => void runAction(action.label, action.run)}
+              title="Ansicht aktualisieren"
+              aria-label="Ansicht aktualisieren"
+              onClick={() => void refresh()}
             >
-              <Icon name={action.icon} />
+              <Icon name="refresh" />
             </button>
-          ))}
+            <button
+              type="button"
+              className={`icon-btn${showMode ? " active" : ""}`}
+              title={showMode ? "Show-Modus aus (Beträge sichtbar)" : "Show-Modus an (Beträge auf 0)"}
+              aria-label={showMode ? "Show-Modus deaktivieren" : "Show-Modus aktivieren"}
+              aria-pressed={showMode}
+              onClick={() => setShowMode((v) => !v)}
+            >
+              <Icon name={showMode ? "eye-off" : "eye"} />
+            </button>
+            {OPS_ACTIONS.map((action) => (
+              <button
+                key={action.id}
+                type="button"
+                className="icon-btn"
+                title={action.label}
+                aria-label={action.label}
+                onClick={() => void runAction(action.label, action.run)}
+              >
+                <Icon name={action.icon} />
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -547,23 +584,6 @@ export default function App() {
           </button>
         ))}
       </nav>
-
-      <div className="status-bar" role="status">
-        <div className="status-bar-main">
-          {status && <p className={`status ${error ? "" : "ok"}`}>{status}</p>}
-          {error && <p className="status error">{error}</p>}
-          {!status && !error && <p className="status">Bereit</p>}
-        </div>
-        <button
-          type="button"
-          className="icon-btn icon-btn-on-panel"
-          title="Ansicht aktualisieren"
-          aria-label="Ansicht aktualisieren"
-          onClick={() => void refresh()}
-        >
-          <Icon name="refresh" />
-        </button>
-      </div>
 
       {tab === "overview" && overview && (
         <div className="workspace">
@@ -709,8 +729,8 @@ export default function App() {
               <thead>
                 <tr>
                   <SortHeader
-                    label="ISIN"
-                    column="isin"
+                    label={assetIdColumnLabel(portfolioSettings?.asset_id_preference)}
+                    column="display_id"
                     sort={lotsSort}
                     onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
                   />
@@ -761,7 +781,7 @@ export default function App() {
               <tbody>
                 {sortRows(lots, lotsSort).map((lot) => (
                   <tr key={lot.id}>
-                    <td className="mono">{lot.isin}</td>
+                    <td className="mono">{lot.display_id ?? lot.isin}</td>
                     <td className="mono">{lot.open_date}</td>
                     <td>{lot.status}</td>
                     <td className="mono">{qty(lot.open_qty, showMode)}</td>
@@ -788,8 +808,8 @@ export default function App() {
               <thead>
                 <tr>
                   <SortHeader
-                    label="ISIN"
-                    column="isin"
+                    label={assetIdColumnLabel(portfolioSettings?.asset_id_preference)}
+                    column="display_id"
                     sort={positionsSort}
                     onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
                   />
@@ -834,7 +854,7 @@ export default function App() {
               <tbody>
                 {sortRows(overview.positions, positionsSort).map((p) => (
                   <tr key={p.isin}>
-                    <td className="mono">{p.isin}</td>
+                    <td className="mono">{p.display_id ?? p.isin}</td>
                     <td className="mono">{qty(p.open_qty, showMode)}</td>
                     <td className="mono">{money(p.invested, showMode)}</td>
                     <td className="mono">{money(p.market_value, showMode)}</td>
@@ -884,7 +904,23 @@ export default function App() {
                   return (
                   <tr key={item.id}>
                     <td className="mono">{item.id}</td>
-                    <td className="mono">{item.paperless_doc_id}</td>
+                    <td>
+                      <div className="doc-cell">
+                        <span className="mono">{item.paperless_doc_id}</span>
+                        {paperlessSettings?.document_base_url ? (
+                          <a
+                            className="doc-link"
+                            href={`${paperlessSettings.document_base_url}/documents/${item.paperless_doc_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={`Paperless Dokument #${item.paperless_doc_id}`}
+                            aria-label={`Paperless Dokument ${item.paperless_doc_id} öffnen`}
+                          >
+                            <Icon name="paperless" />
+                          </a>
+                        ) : null}
+                      </div>
+                    </td>
                     <td>{item.status}</td>
                     <td>{item.payload.wp_typ ?? "—"}</td>
                     <td className="mono">{item.payload.isin ?? item.payload.symbol ?? "—"}</td>
@@ -1012,8 +1048,9 @@ export default function App() {
           </Panel>
           <Panel label="Portfolio / Steuer & Risiko">
             <p className="muted">
-              Freibetrag und risikofreier Zins für Sharpe. Werte sind Schätzungen — keine Steuerberatung.
-              Speichern unten speichert Paperless- und Portfolio-Settings gemeinsam
+              Freibetrag, risikofreier Zins für Sharpe und Anzeige-Kennung (Symbol/WKN/ISIN) für Lots
+              und Positionen. Werte sind Schätzungen — keine Steuerberatung. Speichern unten speichert
+              Paperless- und Portfolio-Settings gemeinsam
               {portfolioSettings
                 ? ` (aktuell Freibetrag ${showMode ? "0,00" : portfolioSettings.tax_allowance_eur} EUR).`
                 : "."}
@@ -1021,9 +1058,10 @@ export default function App() {
           </Panel>
           <Panel label="Einstellungen / Paperless">
             <p className="muted">
-              Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. URL/Token/Webhook-Secret bleiben
-              in der Env; Mapping, Tag und Ghostfolio-Defaults werden in der Datenbank gespeichert.
-              Handelsdatum = Dokumentdatum in Paperless; Währung kommt aus den Monetary-Feldern.
+              Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. API-URL/Token/Webhook-Secret
+              bleiben in der Env; Mapping, Tag, öffentliche Web-URL und Ghostfolio-Defaults werden in
+              der Datenbank gespeichert. Handelsdatum = Dokumentdatum in Paperless; Währung kommt aus
+              den Monetary-Feldern.
             </p>
             {paperlessSettings && (
               <p className="muted">
@@ -1069,6 +1107,23 @@ export default function App() {
                   placeholder="0"
                 />
               </label>
+              <label>
+                Kennung in Lots / Positionen
+                <select
+                  value={assetIdPrefDraft}
+                  onChange={(e) =>
+                    setAssetIdPrefDraft(e.target.value as "symbol" | "wkn" | "isin")
+                  }
+                >
+                  <option value="symbol">Symbol (Ghostfolio-Standard)</option>
+                  <option value="wkn">WKN (aus Paperless-Mapping)</option>
+                  <option value="isin">ISIN</option>
+                </select>
+                <span className="muted">
+                  Fallback-Kette: gewählte Kennung → Symbol/ISIN/WKN → Asset-Key. WKN wird gelernt,
+                  sobald ein Paperless-Beleg ISIN und WKN enthält.
+                </span>
+              </label>
               <div className="settings-actions">
                 <button type="button" onClick={() => void onTestPaperless()}>
                   Verbindung testen
@@ -1103,6 +1158,21 @@ export default function App() {
               {paperlessSettings?.notes && (
                 <p className="muted">{Object.values(paperlessSettings.notes).join(" · ")}</p>
               )}
+              <label>
+                Paperless Web-URL (Browser)
+                <input
+                  value={publicUrlDraft}
+                  onChange={(e) => setPublicUrlDraft(e.target.value)}
+                  placeholder="https://paperless.example.com"
+                />
+                <span className="muted">
+                  Für Doc-Links im Staging. Fallback: PAPERLESS_URL aus Env
+                  {paperlessSettings?.document_base_url
+                    ? ` (aktuell ${paperlessSettings.document_base_url})`
+                    : ""}
+                  .
+                </span>
+              </label>
               <label>
                 Paperless-Tag (optional)
                 <input

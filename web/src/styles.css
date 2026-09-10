@@ -152,7 +152,62 @@ select {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.topbar-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 14px;
   margin-left: auto;
+  min-width: 0;
+}
+
+.topbar-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+  max-width: min(420px, 50vw);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.topbar-status .status {
+  color: color-mix(in srgb, var(--bar-ink) 72%, transparent);
+}
+
+.topbar-status .status.ok {
+  color: var(--accent);
+}
+
+.topbar-status .status.error {
+  color: #ff8f8f;
+}
+
+.doc-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.doc-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.doc-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .icon-btn {
@@ -522,28 +577,6 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.status-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 16px;
-  margin: 0 0 14px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  box-shadow: 3px 3px 0 var(--line);
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-}
-
-.status-bar-main {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  min-width: 0;
 }
 
 .ops-list {

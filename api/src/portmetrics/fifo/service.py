@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from portmetrics.assets.identifiers import enrich_asset_fields, wkn_map
 from portmetrics.db.models import Activity, Lot, LotConsumption, LotStatus, PriceSnapshot
 from portmetrics.fifo.engine import (
     FifoError,
@@ -16,6 +17,7 @@ from portmetrics.fifo.engine import (
     create_lot_from_buy,
     estimate_tax,
 )
+from portmetrics.settings.portfolio import get_portfolio_settings
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,13 @@ def list_open_lots(
         stmt = stmt.where(Lot.isin == asset_key)
     stmt = stmt.order_by(Lot.isin.asc(), Lot.open_date.asc(), Lot.id.asc())
     rows = session.scalars(stmt).all()
+    activity_ids = {lot.activity_id for lot in rows}
+    activities = {
+        row.id: row
+        for row in session.scalars(select(Activity).where(Activity.id.in_(activity_ids))).all()
+    } if activity_ids else {}
+    wkn_by_isin = wkn_map(session)
+    preference = get_portfolio_settings(session)["asset_id_preference"]
     out: list[dict] = []
     for lot in rows:
         unit_cost = (
@@ -162,11 +171,23 @@ def list_open_lots(
             if unrealized is not None and invested_open != 0
             else None
         )
+        activity = activities.get(lot.activity_id)
+        ids = enrich_asset_fields(
+            asset_key=lot.isin,
+            activity_isin=activity.isin if activity else None,
+            symbol=activity.symbol if activity else None,
+            wkn_by_isin=wkn_by_isin,
+            preference=preference,
+        )
         out.append(
             {
                 "id": lot.id,
                 "activity_id": lot.activity_id,
                 "isin": lot.isin,
+                "symbol": ids["symbol"],
+                "wkn": ids["wkn"],
+                "isin_code": ids["isin_code"],
+                "display_id": ids["display_id"],
                 "open_qty": str(lot.open_qty),
                 "original_qty": str(lot.original_qty),
                 "cost_basis": str(lot.cost_basis),

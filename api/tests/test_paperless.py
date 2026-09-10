@@ -231,6 +231,15 @@ def test_save_and_resolve_mapping(db_session) -> None:
     assert saved["field_map"]["isin"] == 2
     assert get_paperless_settings(db_session)["ghostfolio_data_source"] == "MANUAL"
 
+    saved_url = save_paperless_settings(
+        db_session,
+        {
+            "field_map": saved["field_map"],
+            "public_url": "https://paperless.example.com/",
+        },
+    )
+    assert saved_url["public_url"] == "https://paperless.example.com"
+
     def handler(request: httpx.Request) -> httpx.Response:
         handled = _fields_handler(request)
         if handled:
@@ -298,6 +307,11 @@ def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
     links = db_session.scalars(select(DocumentLink)).all()
     assert len(links) == 1
     assert links[0].paperless_doc_id == 99
+    from portmetrics.db.models import AssetIdentifier
+
+    ident = db_session.get(AssetIdentifier, "IE00BK5BQT80")
+    assert ident is not None
+    assert ident.wkn == "A1JX52"
 
 
 def test_confirm_other_rejected(db_session) -> None:
