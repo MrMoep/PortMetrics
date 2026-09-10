@@ -43,6 +43,7 @@ from portmetrics.paperless.mapping import (
     has_sync_filters,
     save_paperless_settings,
 )
+from portmetrics.paperless.match import match_staging_to_activities
 from portmetrics.paperless.staging import (
     SYNC_MODE_FULL,
     SYNC_MODE_PARTIAL,
@@ -644,6 +645,20 @@ def staging_reject(staging_id: int, db: Session = Depends(get_db)) -> dict:
         return reject_staging(db, staging_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/staging/match-activities")
+def staging_match_activities(db: Session = Depends(get_db)) -> dict:
+    """Manually link open staging docs to existing Ghostfolio activities (no GF import)."""
+    result = match_staging_to_activities(db)
+    return {
+        "scanned": result.scanned,
+        "matched": result.matched,
+        "ambiguous": result.ambiguous,
+        "unmatched": result.unmatched,
+        "skipped": result.skipped,
+        "items": result.items,
+    }
 
 
 if WEB_DIST.is_dir():

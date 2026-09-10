@@ -148,6 +148,8 @@ Unvollst?ndige Felder werden ?bersprungen (`action=skipped`); manueller Sync ble
 
 | `POST` | `/api/staging/sync?mode=full` | Full Sync, NDJSON-Progress |
 
+| `POST` | `/api/staging/match-activities` | Manuell: Staging an bestehende Activities |
+
 | `POST` | `/api/webhooks/paperless` | Auto-Ingest eines Docs |
 
 | `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio (`OTHER` -> 400) |

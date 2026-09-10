@@ -248,6 +248,15 @@ export const api = {
     request<StagingItem>(`/api/staging/${id}/confirm`, { method: "POST" }),
   stagingReject: (id: number) =>
     request<StagingItem>(`/api/staging/${id}/reject`, { method: "POST" }),
+  stagingMatchActivities: () =>
+    request<{
+      scanned: number;
+      matched: number;
+      ambiguous: number;
+      unmatched: number;
+      skipped: number;
+      items: Array<Record<string, unknown>>;
+    }>("/api/staging/match-activities", { method: "POST" }),
   paperlessSettings: () => request<PaperlessSettings>("/api/settings/paperless"),
   savePaperlessSettings: (body: {
     field_map?: Record<string, number | null>;
