@@ -321,6 +321,15 @@ def staging_sync(db: Session = Depends(get_db)) -> dict:
     }
 
 
+def _paperless_document_base_url(cfg: dict) -> str | None:
+    public = cfg.get("public_url")
+    if public:
+        return str(public).rstrip("/")
+    if settings.paperless_url:
+        return settings.paperless_url.rstrip("/")
+    return None
+
+
 def _paperless_settings_payload(cfg: dict) -> dict:
     return {
         "roles": list(FIELD_ROLES),
@@ -329,6 +338,8 @@ def _paperless_settings_payload(cfg: dict) -> dict:
         "tag": cfg["tag"],
         "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
         "ghostfolio_data_source": cfg["ghostfolio_data_source"],
+        "public_url": cfg.get("public_url"),
+        "document_base_url": _paperless_document_base_url(cfg),
         "paperless_configured": bool(settings.paperless_url and settings.paperless_token),
         "webhook_secret_configured": bool(settings.paperless_webhook_secret),
         "webhook_path": "/api/webhooks/paperless",
@@ -337,6 +348,7 @@ def _paperless_settings_payload(cfg: dict) -> dict:
             "trade_date": "Handelsdatum = Paperless-Dokumentdatum (created), kein Custom Field.",
             "currency": "Währung aus Monetary-Feldern Kurs/Entgelte (z.B. EUR152.34).",
             "symbol": "Ghostfolio-Symbol = ISIN (kein separates Symbol-Feld).",
+            "public_url": "Browser-URL für Doc-Links; Fallback PAPERLESS_URL (Env).",
         },
     }
 

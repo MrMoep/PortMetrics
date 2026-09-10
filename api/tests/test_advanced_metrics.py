@@ -123,6 +123,7 @@ def test_portfolio_settings_roundtrip(db_session) -> None:
     )
     assert saved["tax_allowance_eur"] == "2000"
     assert saved["risk_free_rate"] == "0.02"
+    assert saved["asset_id_preference"] == "symbol"
     assert get_portfolio_settings(db_session)["tax_warn_pct"] == "0.9"
 
 

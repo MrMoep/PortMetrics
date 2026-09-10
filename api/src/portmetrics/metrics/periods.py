@@ -254,6 +254,7 @@ def nav_series(
 def position_simple_return(session: Session, asset_key: str | None = None) -> list[dict]:
     lots = list_open_lots(session, asset_key=asset_key)
     by_asset: dict[str, dict[str, Decimal]] = {}
+    meta: dict[str, dict[str, str | None]] = {}
     for lot in lots:
         key = lot["isin"]
         bucket = by_asset.setdefault(
@@ -266,6 +267,13 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
         bucket["invested"] += open_qty * unit_cost
         if lot["market_value"] is not None:
             bucket["market_value"] += _d(lot["market_value"])
+        if key not in meta:
+            meta[key] = {
+                "symbol": lot.get("symbol"),
+                "wkn": lot.get("wkn"),
+                "isin_code": lot.get("isin_code"),
+                "display_id": lot.get("display_id") or key,
+            }
     rows: list[dict] = []
     for key, values in sorted(by_asset.items()):
         invested = values["invested"]
@@ -273,9 +281,14 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
         simple = None
         if invested != 0 and market != 0:
             simple = ((market - invested) / invested).quantize(Decimal("0.0001"))
+        ids = meta.get(key) or {}
         rows.append(
             {
                 "isin": key,
+                "symbol": ids.get("symbol"),
+                "wkn": ids.get("wkn"),
+                "isin_code": ids.get("isin_code"),
+                "display_id": ids.get("display_id") or key,
                 "open_qty": str(values["open_qty"]),
                 "invested": str(invested),
                 "market_value": str(market),

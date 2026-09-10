@@ -77,12 +77,21 @@ REQUIRED_ROLES: tuple[str, ...] = tuple(
 )
 
 
+def _normalize_public_url(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().rstrip("/")
+    return text or None
+
+
 def empty_paperless_settings() -> dict[str, Any]:
     return {
         "field_map": {},  # role → paperless field id
         "tag": settings.paperless_tag,
         "ghostfolio_default_account_id": settings.ghostfolio_default_account_id,
         "ghostfolio_data_source": settings.ghostfolio_data_source,
+        # Browser-reachable Paperless UI base (npm/local); API URL often stays Docker-internal.
+        "public_url": None,
     }
 
 
@@ -110,6 +119,7 @@ def get_paperless_settings(session: Session) -> dict[str, Any]:
     )
     source = merged.get("ghostfolio_data_source") or settings.ghostfolio_data_source
     merged["ghostfolio_data_source"] = str(source).strip() or settings.ghostfolio_data_source
+    merged["public_url"] = _normalize_public_url(merged.get("public_url"))
     return merged
 
 
@@ -134,6 +144,7 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
         current["ghostfolio_default_account_id"],
     )
     data_source = payload.get("ghostfolio_data_source", current["ghostfolio_data_source"])
+    public_url = payload.get("public_url", current["public_url"])
 
     value = {
         "field_map": field_map,
@@ -146,6 +157,7 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
             if data_source is not None
             else settings.ghostfolio_data_source
         ),
+        "public_url": _normalize_public_url(public_url),
     }
     row = session.get(AppSetting, PAPERLESS_SETTINGS_KEY)
     if row is None:

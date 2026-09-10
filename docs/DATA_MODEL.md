@@ -70,7 +70,8 @@ Verkauf → verbrauchte Lots.
 | `metrics_daily` | Vorberechnete KPIs (nav, invested, mtd_return, ytd_return, …) |
 | `document_links` | Paperless-Dokument ↔ Activity/Lot |
 | `staging_imports` | Review-Queue vor Ghostfolio-Import |
-| `app_settings` | UI-Settings (z. B. Paperless Field-Map) |
+| `asset_identifiers` | ISIN → WKN (gelernt aus Paperless-Belegen mit beiden Feldern) |
+| `app_settings` | UI-Settings (z. B. Paperless Field-Map, Anzeige-Kennung) |
 | `sync_state` | Idempotenz, last_sync_at, cursor |
 
 ## FIFO-Algorithmus
