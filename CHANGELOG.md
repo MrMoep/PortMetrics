@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`
+- Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Symbol = ISIN
+- Typ `OTHER` im Staging sichtbar, Confirm gesperrt; kein Paperless-Write-back für Import-Status/Activity-ID
+
 ## [0.2.0] — 2026-09-09
 
 Paperless-UX und Homelab-Feinschliff über 0.1.0.

@@ -18,6 +18,7 @@ from portmetrics.paperless.client import PaperlessClient, PaperlessError
 from portmetrics.paperless.mapping import (
     DEFAULT_ROLE_TO_NAME,
     FIELD_ROLES,
+    LEGACY_EXTRA_NAMES,
     ensure_required_roles,
     extract_fields_by_roles,
     get_paperless_settings,
@@ -29,6 +30,17 @@ STATUS_PENDING = "pending"
 STATUS_IMPORTED = "imported"
 STATUS_REJECTED = "rejected"
 STATUS_ERROR = "error"
+
+IMPORTABLE_TYPES = frozenset({"BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"})
+STAGING_TYPES = IMPORTABLE_TYPES | {"OTHER"}
+TYPES_WITHOUT_QTY = frozenset({"FEE", "INTEREST", "OTHER"})
+
+_MONETARY_PREFIX = re.compile(
+    r"^([A-Za-z]{3})\s*([+-]?\d+(?:[.,]\d+)?)\s*$"
+)
+_MONETARY_SUFFIX = re.compile(
+    r"^([+-]?\d+(?:[.,]\d+)?)\s*([A-Za-z]{3})\s*$"
+)
 
 
 @dataclass(frozen=True)
@@ -46,11 +58,42 @@ class DocumentIngestResult:
     staging_id: int | None = None
 
 
-def _as_decimal(value: Any, default: str = "0") -> Decimal:
+def _as_decimal(value: Any, default: str | None = "0") -> Decimal:
     if value is None or value == "":
+        if default is None:
+            raise ValueError("Missing decimal value")
         return Decimal(default)
+    amount, _ = parse_monetary(value)
+    return amount
+
+
+def parse_monetary(value: Any) -> tuple[Decimal, str | None]:
+    """Parse plain number or Paperless monetary string (`EUR152.34` / `152.34 EUR`)."""
+    if isinstance(value, (int, float, Decimal)):
+        return Decimal(str(value)), None
+    if isinstance(value, dict):
+        amount = value.get("amount", value.get("value"))
+        currency = value.get("currency") or value.get("currency_code")
+        if amount is None:
+            raise ValueError(f"Invalid monetary object: {value!r}")
+        parsed, _ = parse_monetary(amount)
+        code = str(currency).strip().upper()[:3] if currency else None
+        return parsed, code
+
+    text = str(value).strip()
+    if not text:
+        raise ValueError("Empty monetary value")
+
+    match = _MONETARY_PREFIX.match(text)
+    if match:
+        return Decimal(match.group(2).replace(",", ".")), match.group(1).upper()
+
+    match = _MONETARY_SUFFIX.match(text)
+    if match:
+        return Decimal(match.group(1).replace(",", ".")), match.group(2).upper()
+
     try:
-        return Decimal(str(value).replace(",", "."))
+        return Decimal(text.replace(",", ".")), None
     except (InvalidOperation, ValueError) as exc:
         raise ValueError(f"Invalid decimal: {value!r}") from exc
 
@@ -64,42 +107,92 @@ def _as_date(value: Any) -> date:
     return date.fromisoformat(text[:10])
 
 
+def document_trade_date(document: dict[str, Any]) -> date:
+    """Paperless document date (`created`) used as Handelsdatum."""
+    raw = document.get("created") or document.get("created_date")
+    if not raw:
+        raise ValueError("Document missing created date")
+    return _as_date(raw)
+
+
 def build_staging_payload(
     document: dict[str, Any],
     fields: dict[str, Any],
 ) -> dict[str, Any]:
     """Build staging payload from role-keyed fields (or legacy name-keyed)."""
     roles = _normalize_to_roles(fields)
-    isin = (roles.get("isin") or "").strip() or None
-    symbol = (roles.get("symbol") or "").strip() or isin
-    if not symbol:
-        raise ValueError("Document missing symbol/isin custom field")
     wp_typ = (roles.get("type") or "BUY").strip().upper()
-    if wp_typ not in {"BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"}:
+    if wp_typ not in STAGING_TYPES:
         raise ValueError(f"Unsupported wp_typ: {wp_typ}")
-    trade_date = roles.get("trade_date")
-    if not trade_date:
-        raise ValueError("Document missing trade_date")
+
+    isin = (roles.get("isin") or "").strip() or None
+    wkn = (roles.get("wkn") or "").strip() or None
+    # Ghostfolio keys on symbol; we use ISIN (no separate ticker field).
+    symbol = isin or wkn
+    if wp_typ != "OTHER" and not symbol:
+        raise ValueError("Document missing isin custom field")
+    if not symbol:
+        symbol = "OTHER"
+
+    unit_raw = roles.get("unit_price")
+    fee_raw = roles.get("fee")
+    currency: str | None = None
+    if unit_raw is not None and unit_raw != "":
+        unit_price, currency = parse_monetary(unit_raw)
+    elif wp_typ in TYPES_WITHOUT_QTY:
+        unit_price = Decimal("0")
+    else:
+        raise ValueError("Document missing unit_price (Kurs)")
+
+    if fee_raw is not None and fee_raw != "":
+        fee, fee_ccy = parse_monetary(fee_raw)
+        if currency is None and fee_ccy:
+            currency = fee_ccy
+    else:
+        fee = Decimal("0")
+
+    legacy_ccy = roles.get("currency")
+    if currency is None and legacy_ccy:
+        currency = str(legacy_ccy).strip().upper()[:3] or None
+    if currency is None:
+        currency = "EUR"
+
+    qty_raw = roles.get("quantity")
+    if qty_raw is None or qty_raw == "":
+        if wp_typ in TYPES_WITHOUT_QTY:
+            quantity = Decimal("1")
+        else:
+            raise ValueError("Document missing quantity (Nennwert)")
+    else:
+        quantity = _as_decimal(qty_raw, default=None)
+
+    trade_raw = roles.get("trade_date")
+    if trade_raw:
+        trade_date = _as_date(trade_raw)
+    else:
+        trade_date = document_trade_date(document)
+
     return {
         "paperless_doc_id": int(document["id"]),
         "title": document.get("title"),
         "wp_typ": wp_typ,
         "isin": isin,
+        "wkn": wkn,
         "symbol": symbol,
-        "quantity": str(_as_decimal(roles.get("quantity"))),
-        "unit_price": str(_as_decimal(roles.get("unit_price"))),
-        "fee": str(_as_decimal(roles.get("fee"), "0")),
-        "currency": (roles.get("currency") or "EUR").strip().upper()[:3],
-        "trade_date": _as_date(trade_date).isoformat(),
-        "gf_import_status": roles.get("import_status"),
-        "gf_activity_id": roles.get("activity_id"),
+        "quantity": str(quantity),
+        "unit_price": str(unit_price),
+        "fee": str(fee),
+        "currency": currency,
+        "trade_date": trade_date.isoformat(),
+        "importable": wp_typ in IMPORTABLE_TYPES,
         "raw_fields": {role: roles.get(role) for role in FIELD_ROLES},
     }
 
 
 def _normalize_to_roles(fields: dict[str, Any]) -> dict[str, Any]:
     """Accept role keys or legacy Paperless names."""
-    role_only = {"type", "quantity", "unit_price", "trade_date", "import_status", "activity_id"}
+    # Unambiguous role keys (isin/wkn exist in both naming schemes).
+    role_only = {"type", "quantity", "unit_price", "fee", "trade_date", "currency"}
     legacy_only = {
         "wp_typ",
         "stueckzahl",
@@ -111,9 +204,16 @@ def _normalize_to_roles(fields: dict[str, Any]) -> dict[str, Any]:
         "gf_activity_id",
     }
     if any(key in fields for key in role_only):
-        return {role: fields.get(role) for role in FIELD_ROLES}
+        out = {role: fields.get(role) for role in FIELD_ROLES}
+        for legacy_role in ("trade_date", "currency", "import_status", "activity_id", "symbol"):
+            if legacy_role in fields:
+                out[legacy_role] = fields.get(legacy_role)
+        return out
     if any(key in fields for key in legacy_only):
-        return {role: fields.get(name) for role, name in DEFAULT_ROLE_TO_NAME.items()}
+        out = {role: fields.get(name) for role, name in DEFAULT_ROLE_TO_NAME.items()}
+        for role, name in LEGACY_EXTRA_NAMES.items():
+            out[role] = fields.get(name)
+        return out
     return {role: fields.get(role) for role in FIELD_ROLES}
 
 
@@ -123,11 +223,16 @@ def _upsert_document_from_fields(
     fields: dict[str, Any],
 ) -> DocumentIngestResult:
     doc_id = int(document["id"])
+    # Legacy Paperless write-back: skip if previously marked imported.
     status_hint = str(fields.get("import_status") or "").strip().lower()
     if status_hint == STATUS_IMPORTED and fields.get("activity_id"):
         return DocumentIngestResult(doc_id, "skipped", "already imported in Paperless")
-    if not fields.get("isin") and not fields.get("symbol"):
-        return DocumentIngestResult(doc_id, "skipped", "missing isin/symbol")
+
+    roles = _normalize_to_roles(fields)
+    wp_typ = (str(roles.get("type") or "BUY")).strip().upper()
+    if wp_typ != "OTHER" and not roles.get("isin") and not roles.get("symbol"):
+        return DocumentIngestResult(doc_id, "skipped", "missing isin")
+
     try:
         payload = build_staging_payload(document, fields)
     except ValueError as exc:
@@ -246,11 +351,14 @@ def list_staging(
 
 
 def _serialize_staging(row: StagingImport) -> dict[str, Any]:
+    payload = dict(row.payload or {})
+    wp_typ = str(payload.get("wp_typ") or "").upper()
+    payload.setdefault("importable", wp_typ in IMPORTABLE_TYPES)
     return {
         "id": row.id,
         "paperless_doc_id": row.paperless_doc_id,
         "status": row.status,
-        "payload": row.payload,
+        "payload": payload,
         "gf_activity_id": str(row.gf_activity_id) if row.gf_activity_id else None,
         "error": row.error,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -272,7 +380,7 @@ def confirm_staging(
     session: Session,
     staging_id: int,
     ghostfolio: GhostfolioClient,
-    paperless: PaperlessClient | None = None,
+    paperless: PaperlessClient | None = None,  # noqa: ARG001 — kept for call-site compat
     *,
     account_id: str | None = None,
 ) -> dict[str, Any]:
@@ -284,6 +392,13 @@ def confirm_staging(
 
     paperless_settings = get_paperless_settings(session)
     payload = dict(row.payload or {})
+    wp_typ = str(payload.get("wp_typ") or "").upper()
+    if wp_typ not in IMPORTABLE_TYPES:
+        raise ValueError(
+            f"Cannot import type {wp_typ or 'UNKNOWN'} — "
+            "set Typ to BUY/SELL/DIVIDEND/FEE/INTEREST in Paperless and re-sync"
+        )
+
     resolved_account = (
         account_id
         or paperless_settings.get("ghostfolio_default_account_id")
@@ -305,6 +420,8 @@ def confirm_staging(
     if payload.get("isin"):
         # Ghostfolio import primarily keys on symbol; keep ISIN in comment for audit.
         activity["comment"] = f"paperless:{row.paperless_doc_id} isin={payload['isin']}"
+    if payload.get("wkn"):
+        activity["comment"] = f"{activity['comment']} wkn={payload['wkn']}"
 
     try:
         imported = ghostfolio.import_activities([activity])
@@ -328,24 +445,6 @@ def confirm_staging(
                 link_type="source",
             )
         )
-
-    if paperless is not None:
-        try:
-            role_map = resolve_role_field_map(session, paperless)
-            values_by_id: dict[int, Any] = {}
-            if "import_status" in role_map:
-                values_by_id[role_map["import_status"]] = STATUS_IMPORTED
-            if "activity_id" in role_map:
-                values_by_id[role_map["activity_id"]] = (
-                    str(activity_id) if activity_id else ""
-                )
-            if values_by_id:
-                paperless.patch_document_custom_fields(
-                    row.paperless_doc_id,
-                    values_by_field_id=values_by_id,
-                )
-        except PaperlessError as exc:
-            row.error = f"imported but paperless update failed: {exc}"
 
     session.flush()
     return _serialize_staging(row)

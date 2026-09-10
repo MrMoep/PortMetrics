@@ -21,6 +21,7 @@ from portmetrics.paperless.staging import (
     STATUS_REJECTED,
     build_staging_payload,
     confirm_staging,
+    parse_monetary,
     reject_staging,
     sync_paperless_documents,
 )
@@ -28,46 +29,38 @@ from portmetrics.paperless.staging import (
 FIELD_MAP = {
     "wp_typ": 1,
     "isin": 2,
-    "symbol": 3,
+    "wkn": 3,
     "stueckzahl": 4,
     "kurs": 5,
     "gebuehr": 6,
-    "handelsdatum": 7,
-    "waehrung": 8,
-    "gf_import_status": 9,
-    "gf_activity_id": 10,
 }
 
 ROLE_MAP = {
     "type": 1,
     "isin": 2,
-    "symbol": 3,
+    "wkn": 3,
     "quantity": 4,
     "unit_price": 5,
     "fee": 6,
-    "trade_date": 7,
-    "currency": 8,
-    "import_status": 9,
-    "activity_id": 10,
 }
 
 
-def _doc(doc_id: int = 42) -> dict:
-    return {
+def _doc(doc_id: int = 42, **overrides) -> dict:
+    base = {
         "id": doc_id,
         "title": "Kauf VWCE",
+        "created": "2024-06-01T12:00:00.000Z",
         "custom_fields": [
             {"field": 1, "value": "BUY"},
             {"field": 2, "value": "IE00BK5BQT80"},
-            {"field": 3, "value": "VWCE.DE"},
+            {"field": 3, "value": "A1JX52"},
             {"field": 4, "value": "10"},
-            {"field": 5, "value": "100.5"},
-            {"field": 6, "value": "1.5"},
-            {"field": 7, "value": "2024-06-01"},
-            {"field": 8, "value": "EUR"},
-            {"field": 9, "value": "pending"},
+            {"field": 5, "value": "EUR100.50"},
+            {"field": 6, "value": "EUR1.50"},
         ],
     }
+    base.update(overrides)
+    return base
 
 
 def _fields_handler(request: httpx.Request) -> httpx.Response | None:
@@ -89,20 +82,62 @@ def test_extract_fields_by_roles() -> None:
     fields = extract_fields_by_roles(_doc(), ROLE_MAP)
     assert fields["isin"] == "IE00BK5BQT80"
     assert fields["quantity"] == "10"
+    assert fields["wkn"] == "A1JX52"
+
+
+def test_parse_monetary() -> None:
+    assert parse_monetary("EUR100.50") == (__import__("decimal").Decimal("100.50"), "EUR")
+    assert parse_monetary("CHF42.00")[1] == "CHF"
+    assert parse_monetary("12,5")[0] == __import__("decimal").Decimal("12.5")
 
 
 def test_build_staging_payload_legacy_names() -> None:
     payload = build_staging_payload(_doc(), extract_custom_fields(_doc(), FIELD_MAP))
-    assert payload["symbol"] == "VWCE.DE"
+    assert payload["symbol"] == "IE00BK5BQT80"
     assert payload["wp_typ"] == "BUY"
     assert payload["trade_date"] == "2024-06-01"
     assert payload["quantity"] == "10"
+    assert payload["currency"] == "EUR"
+    assert payload["wkn"] == "A1JX52"
+    assert payload["importable"] is True
 
 
 def test_build_staging_payload_roles() -> None:
     payload = build_staging_payload(_doc(), extract_fields_by_roles(_doc(), ROLE_MAP))
-    assert payload["symbol"] == "VWCE.DE"
+    assert payload["symbol"] == "IE00BK5BQT80"
     assert payload["quantity"] == "10"
+    assert payload["unit_price"] == "100.50"
+
+
+def test_build_staging_payload_other_not_importable() -> None:
+    doc = _doc(
+        7,
+        custom_fields=[
+            {"field": 1, "value": "OTHER"},
+            {"field": 2, "value": "IE00BK5BQT80"},
+            {"field": 5, "value": "EUR0.00"},
+        ],
+    )
+    payload = build_staging_payload(doc, extract_fields_by_roles(doc, ROLE_MAP))
+    assert payload["wp_typ"] == "OTHER"
+    assert payload["importable"] is False
+    assert payload["quantity"] == "1"
+
+
+def test_build_staging_payload_fee_defaults_quantity() -> None:
+    doc = _doc(
+        8,
+        custom_fields=[
+            {"field": 1, "value": "FEE"},
+            {"field": 2, "value": "IE00BK5BQT80"},
+            {"field": 5, "value": "EUR9.90"},
+        ],
+    )
+    payload = build_staging_payload(doc, extract_fields_by_roles(doc, ROLE_MAP))
+    assert payload["wp_typ"] == "FEE"
+    assert payload["quantity"] == "1"
+    assert payload["unit_price"] == "9.90"
+    assert payload["currency"] == "EUR"
 
 
 def test_paperless_list_documents_and_fields() -> None:
@@ -142,7 +177,6 @@ def test_sync_uses_legacy_name_fallback(db_session) -> None:
 
 
 def test_sync_uses_stored_role_mapping(db_session) -> None:
-    # Map roles to ids but use different Paperless names than legacy defaults.
     save_paperless_settings(
         db_session,
         {
@@ -159,14 +193,10 @@ def test_sync_uses_stored_role_mapping(db_session) -> None:
                     "results": [
                         {"id": 1, "name": "TradeType"},
                         {"id": 2, "name": "ISIN"},
-                        {"id": 3, "name": "Ticker"},
+                        {"id": 3, "name": "WKN"},
                         {"id": 4, "name": "Qty"},
                         {"id": 5, "name": "Price"},
                         {"id": 6, "name": "Fee"},
-                        {"id": 7, "name": "TradeDate"},
-                        {"id": 8, "name": "CCY"},
-                        {"id": 9, "name": "ImportStatus"},
-                        {"id": 10, "name": "ActivityId"},
                     ]
                 },
             )
@@ -183,14 +213,15 @@ def test_sync_uses_stored_role_mapping(db_session) -> None:
     assert result.upserted == 1
     row = db_session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == 55))
     assert row is not None
-    assert row.payload["symbol"] == "VWCE.DE"
+    assert row.payload["symbol"] == "IE00BK5BQT80"
+    assert row.payload["currency"] == "EUR"
 
 
 def test_save_and_resolve_mapping(db_session) -> None:
     saved = save_paperless_settings(
         db_session,
         {
-            "field_map": {"isin": 2, "quantity": 4, "unit_price": 5, "trade_date": 7},
+            "field_map": {"type": 1, "isin": 2, "quantity": 4, "unit_price": 5},
             "tag": "wertpapier",
             "ghostfolio_default_account_id": "acc-9",
             "ghostfolio_data_source": "MANUAL",
@@ -214,6 +245,13 @@ def test_save_and_resolve_mapping(db_session) -> None:
     resolved = resolve_role_field_map(db_session, client)
     assert resolved["isin"] == 2
     assert resolved["quantity"] == 4
+    assert "symbol" not in resolved
+    assert "currency" not in resolved
+
+
+def test_save_rejects_removed_roles(db_session) -> None:
+    with pytest.raises(ValueError, match="Unknown field role"):
+        save_paperless_settings(db_session, {"field_map": {"symbol": 3}})
 
 
 def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
@@ -245,7 +283,7 @@ def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
             return httpx.Response(200, json={"authToken": "jwt"})
         if request.url.path.endswith("/import"):
             body = request.read()
-            assert b"VWCE.DE" in body
+            assert b"IE00BK5BQT80" in body
             return httpx.Response(201, json={"activities": [{"id": str(gf_id)}]})
         raise AssertionError(request.url.path)
 
@@ -260,6 +298,31 @@ def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
     links = db_session.scalars(select(DocumentLink)).all()
     assert len(links) == 1
     assert links[0].paperless_doc_id == 99
+
+
+def test_confirm_other_rejected(db_session) -> None:
+    doc = _doc(
+        11,
+        custom_fields=[
+            {"field": 1, "value": "OTHER"},
+            {"field": 2, "value": "IE00BK5BQT80"},
+            {"field": 5, "value": "EUR1.00"},
+        ],
+    )
+    row = StagingImport(
+        paperless_doc_id=11,
+        payload=build_staging_payload(doc, extract_fields_by_roles(doc, ROLE_MAP)),
+        status=STATUS_PENDING,
+    )
+    db_session.add(row)
+    db_session.flush()
+    ghostfolio = GhostfolioClient(
+        "http://ghostfolio.test",
+        "tok",
+        transport=httpx.MockTransport(lambda _r: httpx.Response(500)),
+    )
+    with pytest.raises(ValueError, match="Cannot import type OTHER"):
+        confirm_staging(db_session, row.id, ghostfolio)
 
 
 def test_confirm_missing_raises(db_session) -> None:

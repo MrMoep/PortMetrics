@@ -70,12 +70,14 @@ export type StagingItem = {
     title?: string;
     wp_typ?: string;
     isin?: string;
+    wkn?: string;
     symbol?: string;
     quantity?: string;
     unit_price?: string;
     fee?: string;
     trade_date?: string;
     currency?: string;
+    importable?: boolean;
   };
   gf_activity_id: string | null;
   error: string | null;
@@ -97,8 +99,16 @@ export type PaperlessField = {
   data_type?: string | null;
 };
 
+export type PaperlessRoleMeta = {
+  role: string;
+  required: boolean;
+  label: string;
+  hint?: string;
+};
+
 export type PaperlessSettings = {
   roles: string[];
+  role_meta?: PaperlessRoleMeta[];
   field_map: Record<string, number>;
   tag: string | null;
   ghostfolio_default_account_id: string | null;
@@ -107,6 +117,7 @@ export type PaperlessSettings = {
   webhook_secret_configured: boolean;
   webhook_path: string;
   paperless_sync_interval_minutes: number;
+  notes?: Record<string, string>;
 };
 
 export type PortfolioSettings = {

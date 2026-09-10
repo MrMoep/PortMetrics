@@ -20,18 +20,23 @@ const FALLBACK_VERSION: VersionInfo = {
   repository: "https://github.com/MrMoep/PortMetrics",
 };
 
-const ROLE_LABELS: Record<string, string> = {
-  type: "Typ (BUY/SELL/…)",
-  isin: "ISIN",
-  symbol: "Symbol",
-  quantity: "Stückzahl",
-  unit_price: "Kurs",
-  fee: "Gebühr",
-  trade_date: "Handelsdatum",
-  currency: "Währung",
-  import_status: "Import-Status",
-  activity_id: "Ghostfolio Activity-ID",
-};
+const FALLBACK_ROLE_META: Array<{
+  role: string;
+  required: boolean;
+  label: string;
+  hint?: string;
+}> = [
+  {
+    role: "type",
+    required: true,
+    label: "Typ (BUY/SELL/DIVIDEND/FEE/INTEREST/OTHER)",
+  },
+  { role: "isin", required: true, label: "ISIN" },
+  { role: "wkn", required: false, label: "WKN (optional)" },
+  { role: "quantity", required: true, label: "Stückzahl / Nennwert" },
+  { role: "unit_price", required: true, label: "Kurs (Stückkurs)" },
+  { role: "fee", required: false, label: "Entgelte / Gebühr (optional)" },
+];
 
 const METRIC_HINTS: Record<string, string> = {
   nav: "Nettoinventarwert — aktueller Marktwert aller offenen Positionen.",
@@ -47,21 +52,45 @@ const METRIC_HINTS: Record<string, string> = {
   dividends: "Summe erhaltener Dividenden über den betrachteten Zeitraum.",
 };
 
-function pct(value: string | null | undefined): string {
+function pct(value: string | null | undefined, hide = false): string {
   if (value == null) return "—";
+  if (hide) return "0,00 %";
   const n = Number(value);
   if (Number.isNaN(n)) return value;
   return `${(n * 100).toFixed(2)} %`;
 }
 
-function money(value: string | null | undefined): string {
+function money(value: string | null | undefined, hide = false): string {
   if (value == null) return "—";
+  if (hide) return "0,00";
   const n = Number(value);
   if (Number.isNaN(n)) return value;
   return n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function signedClass(value: string | number | null | undefined): string {
+/** Percent points already scaled (e.g. API `12.34` → `12.34 %`). */
+function pctPoints(value: string | number | null | undefined, hide = false): string {
+  if (value == null || value === "") return "—";
+  if (hide) return "0,00 %";
+  return `${value} %`;
+}
+
+function qty(value: string | number | null | undefined, hide = false): string {
+  if (value == null || value === "") return "—";
+  if (hide) return "0";
+  return String(value);
+}
+
+function ratio(value: string | number | null | undefined, hide = false): string {
+  if (value == null || value === "") return "—";
+  if (hide) return "0.00";
+  const n = typeof value === "number" ? value : Number(value);
+  if (Number.isNaN(n)) return String(value);
+  return n.toFixed(2);
+}
+
+function signedClass(value: string | number | null | undefined, hide = false): string {
+  if (hide) return "";
   if (value == null || value === "") return "";
   const n = typeof value === "number" ? value : Number(value);
   if (Number.isNaN(n) || n === 0) return "";
@@ -148,7 +177,7 @@ function Panel({
   );
 }
 
-type IconName = "sync" | "fifo" | "metrics" | "paperless" | "refresh";
+type IconName = "sync" | "fifo" | "metrics" | "paperless" | "refresh" | "eye" | "eye-off";
 
 function Icon({ name }: { name: IconName }) {
   const common = {
@@ -207,6 +236,21 @@ function Icon({ name }: { name: IconName }) {
           <path d="M3 8a5 5 0 0 1 8.5-3.5" />
           <path d="M13 8a5 5 0 0 1-8.5 3.5" />
           <path d="M11.5 2v3.5H15" />
+        </svg>
+      );
+    case "eye":
+      return (
+        <svg {...common}>
+          <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z" />
+          <circle cx="8" cy="8" r="2" />
+        </svg>
+      );
+    case "eye-off":
+      return (
+        <svg {...common}>
+          <path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z" />
+          <circle cx="8" cy="8" r="2" />
+          <path d="M3 13.5 13 2.5" />
         </svg>
       );
   }
@@ -271,6 +315,8 @@ export default function App() {
   const [cashflowSort, setCashflowSort] = useState<SortState>({ key: "date", dir: "desc" });
   const [lotsSort, setLotsSort] = useState<SortState>({ key: "open_date", dir: "desc" });
   const [positionsSort, setPositionsSort] = useState<SortState>({ key: "invested", dir: "desc" });
+  /** Presentation mode: zero displayed money/pct/qty (display-only, data still loaded). */
+  const [showMode, setShowMode] = useState(false);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -455,6 +501,16 @@ export default function App() {
           </p>
         </div>
         <div className="ops-icons" role="toolbar" aria-label="Wartungsaktionen">
+          <button
+            type="button"
+            className={`icon-btn${showMode ? " active" : ""}`}
+            title={showMode ? "Show-Modus aus (Beträge sichtbar)" : "Show-Modus an (Beträge auf 0)"}
+            aria-label={showMode ? "Show-Modus deaktivieren" : "Show-Modus aktivieren"}
+            aria-pressed={showMode}
+            onClick={() => setShowMode((v) => !v)}
+          >
+            <Icon name={showMode ? "eye-off" : "eye"} />
+          </button>
           {OPS_ACTIONS.map((action) => (
             <button
               key={action.id}
@@ -796,9 +852,11 @@ export default function App() {
 
       {tab === "staging" && (
         <Panel label="Staging Queue" meta={`${staging.length} EINTRÄGE`}>
-          <p className="muted">
-            Review-Queue aus Paperless. Confirm importiert nach Ghostfolio; danach Sync ausführen.
-          </p>
+            <p className="muted">
+              Review-Queue aus Paperless. Confirm importiert nach Ghostfolio; danach Sync ausführen.
+              Typ OTHER ist sichtbar, aber nicht importierbar — Typ in Paperless korrigieren und
+              erneut syncen.
+            </p>
           <div className="table-wrap">
             <table>
               <thead>
@@ -807,7 +865,7 @@ export default function App() {
                   <th>Doc</th>
                   <th>Status</th>
                   <th>Typ</th>
-                  <th>Symbol</th>
+                  <th>ISIN</th>
                   <th>Menge</th>
                   <th>Kurs</th>
                   <th>Datum</th>
@@ -815,13 +873,16 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {staging.map((item) => (
+                {staging.map((item) => {
+                  const importable =
+                    item.payload.importable !== false && item.payload.wp_typ !== "OTHER";
+                  return (
                   <tr key={item.id}>
                     <td className="mono">{item.id}</td>
                     <td className="mono">{item.paperless_doc_id}</td>
                     <td>{item.status}</td>
                     <td>{item.payload.wp_typ ?? "—"}</td>
-                    <td className="mono">{item.payload.symbol ?? item.payload.isin ?? "—"}</td>
+                    <td className="mono">{item.payload.isin ?? item.payload.symbol ?? "—"}</td>
                     <td className="mono">{item.payload.quantity ?? "—"}</td>
                     <td className="mono">{money(item.payload.unit_price)}</td>
                     <td className="mono">{item.payload.trade_date ?? "—"}</td>
@@ -829,7 +890,12 @@ export default function App() {
                       <button
                         type="button"
                         className="primary"
-                        disabled={item.status === "imported"}
+                        disabled={item.status === "imported" || !importable}
+                        title={
+                          importable
+                            ? undefined
+                            : "Typ OTHER / nicht importierbar — in Paperless korrigieren"
+                        }
                         onClick={() =>
                           void runAction(`Confirm #${item.id}`, () => api.stagingConfirm(item.id))
                         }
@@ -847,7 +913,8 @@ export default function App() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -945,6 +1012,7 @@ export default function App() {
             <p className="muted">
               Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. URL/Token/Webhook-Secret bleiben
               in der Env; Mapping, Tag und Ghostfolio-Defaults werden in der Datenbank gespeichert.
+              Handelsdatum = Dokumentdatum in Paperless; Währung kommt aus den Monetary-Feldern.
             </p>
             {paperlessSettings && (
               <p className="muted">
@@ -998,13 +1066,18 @@ export default function App() {
                   Neu laden
                 </button>
               </div>
-              {(paperlessSettings?.roles ?? []).map((role) => (
-                <label key={role}>
-                  {ROLE_LABELS[role] ?? role}
+              {(paperlessSettings?.role_meta ?? FALLBACK_ROLE_META).map((meta) => (
+                <label key={meta.role}>
+                  {meta.label}
+                  <span className="muted">
+                    {" "}
+                    — {meta.required ? "Pflicht" : "Optional"}
+                    {meta.hint ? ` · ${meta.hint}` : ""}
+                  </span>
                   <select
-                    value={fieldMapDraft[role] ?? ""}
+                    value={fieldMapDraft[meta.role] ?? ""}
                     onChange={(e) =>
-                      setFieldMapDraft((prev) => ({ ...prev, [role]: e.target.value }))
+                      setFieldMapDraft((prev) => ({ ...prev, [meta.role]: e.target.value }))
                     }
                   >
                     <option value="">— nicht zugeordnet —</option>
@@ -1016,6 +1089,9 @@ export default function App() {
                   </select>
                 </label>
               ))}
+              {paperlessSettings?.notes && (
+                <p className="muted">{Object.values(paperlessSettings.notes).join(" · ")}</p>
+              )}
               <label>
                 Paperless-Tag (optional)
                 <input

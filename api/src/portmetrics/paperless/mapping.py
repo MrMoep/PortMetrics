@@ -17,18 +17,64 @@ PAPERLESS_SETTINGS_KEY = "paperless"
 DEFAULT_ROLE_TO_NAME: dict[str, str] = {
     "type": "wp_typ",
     "isin": "isin",
-    "symbol": "symbol",
+    "wkn": "wkn",
     "quantity": "stueckzahl",
     "unit_price": "kurs",
     "fee": "gebuehr",
+}
+
+# Legacy-only names still accepted when no UI mapping is stored / in raw payloads.
+LEGACY_EXTRA_NAMES: dict[str, str] = {
+    "symbol": "symbol",
     "trade_date": "handelsdatum",
     "currency": "waehrung",
     "import_status": "gf_import_status",
     "activity_id": "gf_activity_id",
 }
 
-FIELD_ROLES: tuple[str, ...] = tuple(DEFAULT_ROLE_TO_NAME.keys())
-REQUIRED_ROLES: tuple[str, ...] = ("quantity", "unit_price", "trade_date")
+FIELD_ROLE_META: tuple[dict[str, Any], ...] = (
+    {
+        "role": "type",
+        "required": True,
+        "label": "Typ (BUY/SELL/DIVIDEND/FEE/INTEREST/OTHER)",
+        "hint": "OTHER landet im Staging, ist aber nicht importierbar.",
+    },
+    {
+        "role": "isin",
+        "required": True,
+        "label": "ISIN",
+        "hint": "Primärer Wertpapier-Schlüssel; Ghostfolio-Symbol = ISIN.",
+    },
+    {
+        "role": "wkn",
+        "required": False,
+        "label": "WKN (optional)",
+        "hint": "Nur Audit/Anzeige; nicht für Ghostfolio-Import nötig.",
+    },
+    {
+        "role": "quantity",
+        "required": True,
+        "label": "Stückzahl / Nennwert",
+        "hint": "Bei FEE/INTEREST ohne Stück → intern 1.",
+    },
+    {
+        "role": "unit_price",
+        "required": True,
+        "label": "Kurs (Stückkurs)",
+        "hint": "Monetary-Feld; Währung wird aus dem Wert gelesen (z.B. EUR152.34).",
+    },
+    {
+        "role": "fee",
+        "required": False,
+        "label": "Entgelte / Gebühr (optional)",
+        "hint": "Bei BUY/SELL Kosten; bei DIVIDEND/INTEREST Steuerabzüge. Default 0.",
+    },
+)
+
+FIELD_ROLES: tuple[str, ...] = tuple(item["role"] for item in FIELD_ROLE_META)
+REQUIRED_ROLES: tuple[str, ...] = tuple(
+    item["role"] for item in FIELD_ROLE_META if item["required"]
+)
 
 
 def empty_paperless_settings() -> dict[str, Any]:
@@ -50,7 +96,7 @@ def get_paperless_settings(session: Session) -> dict[str, Any]:
     field_map = merged.get("field_map") or {}
     if not isinstance(field_map, dict):
         field_map = {}
-    # Normalize ids to int
+    # Normalize ids to int; drop removed/unknown roles (symbol, currency, …).
     merged["field_map"] = {
         str(role): int(field_id)
         for role, field_id in field_map.items()
@@ -148,9 +194,6 @@ def extract_fields_by_roles(
 
 def ensure_required_roles(role_to_field_id: dict[str, int]) -> None:
     missing = [role for role in REQUIRED_ROLES if role not in role_to_field_id]
-    has_symbol = "isin" in role_to_field_id or "symbol" in role_to_field_id
-    if not has_symbol:
-        missing.append("isin|symbol")
     if missing:
         raise PaperlessError(
             "Paperless field mapping incomplete (roles): " + ", ".join(missing)
