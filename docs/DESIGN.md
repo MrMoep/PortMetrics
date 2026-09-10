@@ -56,6 +56,7 @@ Hintergrund zusätzlich: **24px-Raster** über halbtransparente Linien (`--grid-
 | Refresh | `.icon-btn-on-panel` in `.status-bar` | Ansicht neu laden — getrennt von Server-Jobs |
 | Ops (Settings) | `.ops-list`, `.ops-row` | Dieselben Jobs mit Label + Hinweis unter Einstellungen |
 | Navigation | `.nav` | Text-Tabs, Active = Accent-Underline (keine Pills) |
+| Settings-Subnav | `.nav.subnav` | Sekundäre Tabs unter Einstellungen; Hash `#settings/<section>` |
 | Status | `.status-bar` | Harte Box unter der Nav |
 | Panel | `.panel`, `.panel-head`, `.panel-body`, `.panel-label` | Modul mit Mono-Kopfzeile |
 | Workspace | `.workspace`, `.workspace-sim` | Split ab ~900px; Simulator enger links |
@@ -63,7 +64,8 @@ Hintergrund zusätzlich: **24px-Raster** über halbtransparente Linien (`--grid-
 | KPI | `.stat`, `.stat-hero` | Harte Kacheln; Hero spannt volle Breite |
 | Werte | `.val-pos`, `.val-neg` | Vorzeichenfarbe |
 | Tabelle | `table`, `.table-wrap` | Sichtbare Zellgrenzen, Mono-Header |
-| Formulare | `.form`, `.form-wide` | Mono-Labels Uppercase |
+| Formulare | `.form`, `.form-wide`, `.form-filters` | Mono-Labels Uppercase; Filter-Form breiter |
+| Sync-Filter | `.filter-grid`, `.filter-col`, `.check-list-*` | Live-Suche; Ausgewählt / Verfügbar getrennt |
 | Primary CTA | `.primary` | Accent-Fill + Hard-Shadow |
 
 ## Interaktion
@@ -80,7 +82,7 @@ Hintergrund zusätzlich: **24px-Raster** über halbtransparente Linien (`--grid-
 | Overview | Workspace: Kennzahlen (Hero-NAV, Tooltips) + Perioden-Tabelle (oben bündig); sortierbare Cashflow-/Lots-/Positions-Tabellen |
 | FIFO Lots / Positionen / Staging | Einzelpanel + dichte Tabelle |
 | Simulator | Split: Formular \| Ergebnispanel |
-| Settings | Ops-Panel (Jobs) + Paperless-Mapping-Panel |
+| Settings | Subnav (Wartung · Portfolio · Paperless · Ghostfolio) + ein Panel; Deep-Links `#settings/ops` usw. |
 | Künftig: Charts / Allokation / Alerts | Als gerahmte Panels im gleichen Raster; Embeds mit Mono-Label „Quelle: …“ |
 
 ## Bewusst vermieden

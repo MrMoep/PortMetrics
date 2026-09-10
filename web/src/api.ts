@@ -250,7 +250,7 @@ export const api = {
     request<StagingItem>(`/api/staging/${id}/reject`, { method: "POST" }),
   paperlessSettings: () => request<PaperlessSettings>("/api/settings/paperless"),
   savePaperlessSettings: (body: {
-    field_map: Record<string, number | null>;
+    field_map?: Record<string, number | null>;
     tag?: string | null;
     sync_tags?: PaperlessIdName[];
     sync_document_types?: PaperlessIdName[];
