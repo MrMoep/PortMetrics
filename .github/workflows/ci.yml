@@ -55,3 +55,25 @@ jobs:
 
       - name: Pytest
         run: pytest --cov=portmetrics --cov-report=term-missing --cov-fail-under=70
+
+  web:
+    name: Web Vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Vitest
+        run: npm test

@@ -10,37 +10,25 @@ import {
   StagingItem,
   VersionInfo,
 } from "./api";
+import {
+  SETTINGS_SECTIONS,
+  assetIdColumnLabel,
+  money,
+  parseSettingsHash,
+  pct,
+  pctPoints,
+  qty,
+  ratio,
+  sameIdNameList,
+  settingsHash,
+  signedClass,
+  sortRows,
+  toggleSort,
+  type SettingsSection,
+  type SortState,
+} from "./uiUtils";
 
 type Tab = "overview" | "lots" | "positions" | "simulator" | "staging" | "settings";
-type SettingsSection = "ops" | "portfolio" | "paperless" | "ghostfolio";
-type SortDir = "asc" | "desc";
-type SortState = { key: string; dir: SortDir };
-
-const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "ops", label: "Wartung" },
-  { id: "portfolio", label: "Portfolio" },
-  { id: "paperless", label: "Paperless" },
-  { id: "ghostfolio", label: "Ghostfolio" },
-];
-
-const SETTINGS_SECTION_IDS = new Set<string>(SETTINGS_SECTIONS.map((s) => s.id));
-
-function parseSettingsHash(hash: string): SettingsSection | null {
-  const match = hash.match(/^#settings\/([a-z]+)$/i);
-  if (!match) return null;
-  const id = match[1].toLowerCase();
-  return SETTINGS_SECTION_IDS.has(id) ? (id as SettingsSection) : null;
-}
-
-function settingsHash(section: SettingsSection): string {
-  return `#settings/${section}`;
-}
-
-function sameIdNameList(a: PaperlessIdName[], b: PaperlessIdName[]): boolean {
-  if (a.length !== b.length) return false;
-  const ids = new Set(a.map((row) => row.id));
-  return b.every((row) => ids.has(row.id));
-}
 
 function SyncFilterPicker({
   label,
@@ -170,81 +158,6 @@ const METRIC_HINTS: Record<string, string> = {
   dividends: "Summe erhaltener Dividenden über den betrachteten Zeitraum.",
 };
 
-function pct(value: string | null | undefined, hide = false): string {
-  if (value == null) return "—";
-  if (hide) return "0,00 %";
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return `${(n * 100).toFixed(2)} %`;
-}
-
-function money(value: string | null | undefined, hide = false): string {
-  if (value == null) return "—";
-  if (hide) return "0,00";
-  const n = Number(value);
-  if (Number.isNaN(n)) return value;
-  return n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-/** Percent points already scaled (e.g. API `12.34` → `12.34 %`). */
-function pctPoints(value: string | number | null | undefined, hide = false): string {
-  if (value == null || value === "") return "—";
-  if (hide) return "0,00 %";
-  return `${value} %`;
-}
-
-function qty(value: string | number | null | undefined, hide = false): string {
-  if (value == null || value === "") return "—";
-  if (hide) return "0";
-  return String(value);
-}
-
-function ratio(value: string | number | null | undefined, hide = false): string {
-  if (value == null || value === "") return "—";
-  if (hide) return "0.00";
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n)) return String(value);
-  return n.toFixed(2);
-}
-
-function signedClass(value: string | number | null | undefined, hide = false): string {
-  if (hide) return "";
-  if (value == null || value === "") return "";
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n) || n === 0) return "";
-  return n > 0 ? "val-pos" : "val-neg";
-}
-
-function toggleSort(prev: SortState, key: string, defaultDir: SortDir = "desc"): SortState {
-  if (prev.key === key) {
-    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
-  }
-  return { key, dir: defaultDir };
-}
-
-function cmpScalar(a: unknown, b: unknown): number {
-  if (a == null && b == null) return 0;
-  if (a == null || a === "") return 1;
-  if (b == null || b === "") return -1;
-  const sa = String(a);
-  const sb = String(b);
-  const na = Number(sa);
-  const nb = Number(sb);
-  if (!Number.isNaN(na) && !Number.isNaN(nb) && sa.trim() !== "" && sb.trim() !== "") {
-    return na - nb;
-  }
-  return sa.localeCompare(sb, "de", { numeric: true });
-}
-
-function sortRows<T>(rows: T[], sort: SortState): T[] {
-  return [...rows].sort((ra, rb) => {
-    const recA = ra as Record<string, unknown>;
-    const recB = rb as Record<string, unknown>;
-    const c = cmpScalar(recA[sort.key], recB[sort.key]);
-    return sort.dir === "asc" ? c : -c;
-  });
-}
-
 function SortHeader({
   label,
   column,
@@ -269,12 +182,6 @@ function SortHeader({
       </button>
     </th>
   );
-}
-
-function assetIdColumnLabel(pref: string | null | undefined): string {
-  if (pref === "wkn") return "WKN";
-  if (pref === "isin") return "ISIN";
-  return "Symbol";
 }
 
 function Panel({

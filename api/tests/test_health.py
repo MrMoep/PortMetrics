@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 import portmetrics.main as main_module
+from portmetrics.build_info import display_version
 from portmetrics.config import Settings
 from portmetrics.main import app
 
@@ -17,7 +18,7 @@ def test_health() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert "env" in body
-    assert body["version"] == "0.2.0"
+    assert body["version"] == display_version()
 
 
 def test_api_version() -> None:
@@ -25,7 +26,8 @@ def test_api_version() -> None:
     response = client.get("/api/version")
     assert response.status_code == 200
     body = response.json()
-    assert body["version"] == "0.2.0"
+    assert body["version"] == display_version()
+    assert body["package_version"]
     assert body["repository"] == "https://github.com/MrMoep/PortMetrics"
 
 

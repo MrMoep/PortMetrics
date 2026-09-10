@@ -66,6 +66,107 @@ def test_fifo_insufficient_qty_raises() -> None:
         )
 
 
+def test_fifo_sell_spans_multiple_lots() -> None:
+    lots = [
+        create_lot_from_buy(
+            activity_id=1,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            trade_date=date(2023, 1, 1),
+        ),
+        create_lot_from_buy(
+            activity_id=2,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("120"),
+            fee=Decimal("0"),
+            trade_date=date(2024, 1, 1),
+        ),
+    ]
+    result = apply_sell(
+        lots,
+        asset_key="IE00",
+        quantity=Decimal("15"),
+        unit_price=Decimal("150"),
+        trade_date=date(2025, 1, 1),
+    )
+    assert len(result.consumptions) == 2
+    assert result.consumptions[0].qty_consumed == Decimal("10")
+    assert result.consumptions[1].qty_consumed == Decimal("5")
+    assert lots[0].status == "CLOSED"
+    assert lots[0].open_qty == Decimal("0")
+    assert lots[1].status == "PARTIAL"
+    assert lots[1].open_qty == Decimal("5")
+    # 10*(150-100) + 5*(150-120) = 500 + 150
+    assert result.realized_gain == Decimal("650")
+
+
+def test_fifo_fee_reduces_realized_gain() -> None:
+    lots = [
+        create_lot_from_buy(
+            activity_id=1,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            trade_date=date(2023, 1, 1),
+        )
+    ]
+    result = apply_sell(
+        lots,
+        asset_key="IE00",
+        quantity=Decimal("5"),
+        unit_price=Decimal("150"),
+        fee=Decimal("10"),
+        trade_date=date(2025, 1, 1),
+    )
+    # net proceeds 750 - 10 = 740; cost 500 → gain 240
+    assert result.realized_gain == Decimal("240")
+    assert result.proceeds == Decimal("740")
+
+
+def test_fifo_ignores_dividend_and_fee_activities(db_session: Session) -> None:
+    _buy(db_session, qty="10", price="100", day=date(2023, 1, 1))
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="acc",
+            isin="IE00BK5BQT80",
+            symbol="VWCE.DE",
+            type="DIVIDEND",
+            quantity=Decimal("1"),
+            unit_price=Decimal("2.5"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2023, 6, 1),
+        )
+    )
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="acc",
+            isin="IE00BK5BQT80",
+            symbol="VWCE.DE",
+            type="FEE",
+            quantity=Decimal("1"),
+            unit_price=Decimal("5"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2023, 7, 1),
+        )
+    )
+    db_session.flush()
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 1
+    assert rebuilt.consumptions == 0
+    assert rebuilt.activities_processed == 3
+    lots = list_open_lots(db_session, asset_key="IE00BK5BQT80")
+    assert len(lots) == 1
+    assert Decimal(lots[0]["open_qty"]) == Decimal("10")
+
+
 def test_estimate_tax_only_on_gains() -> None:
     assert estimate_tax(Decimal("100"), Decimal("0.25")) == Decimal("25.00")
     assert estimate_tax(Decimal("-10"), Decimal("0.25")) == Decimal("0")
