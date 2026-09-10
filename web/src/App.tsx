@@ -807,6 +807,21 @@ export default function App() {
     }
   }
 
+  async function onMatchActivities() {
+    setError("");
+    setStatus("Belege verknüpfen…");
+    try {
+      const result = await api.stagingMatchActivities();
+      await refresh();
+      setStatus(
+        `Verknüpft ${result.matched}/${result.scanned} · mehrdeutig ${result.ambiguous}, ohne Treffer ${result.unmatched}, übersprungen ${result.skipped}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
   async function runPaperlessSync(mode: "partial" | "full") {
     const hasFilters =
       syncTagsDraft.length > 0 ||
@@ -1562,7 +1577,15 @@ export default function App() {
                   <button type="button" onClick={() => void loadSettings()}>
                     Neu laden
                   </button>
+                  <button type="button" onClick={() => void onMatchActivities()}>
+                    Belege mit Ghostfolio verknüpfen
+                  </button>
                 </div>
+                <p className="muted">
+                  Verknüpfen ist manuell: offene Staging-Einträge werden per Typ + ISIN + Datum +
+                  Stückzahl an bestehende Activities gematcht (Kurs nur als Tie-Breaker). Kein
+                  erneuter Ghostfolio-Import. Mehrdeutige bleiben in der Queue.
+                </p>
                 {(paperlessSettings?.role_meta ?? FALLBACK_ROLE_META).map((meta) => (
                   <label key={meta.role}>
                     {meta.label}
