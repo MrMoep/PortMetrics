@@ -180,6 +180,13 @@ select {
   outline-offset: 2px;
 }
 
+.icon-btn.active,
+.icon-btn[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
 .icon-btn-on-panel {
   border-color: var(--line);
   color: var(--ink);
