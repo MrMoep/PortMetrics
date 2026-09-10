@@ -11,6 +11,8 @@ import {
 } from "./api";
 
 type Tab = "overview" | "lots" | "positions" | "simulator" | "staging" | "settings";
+type SortDir = "asc" | "desc";
+type SortState = { key: string; dir: SortDir };
 
 const FALLBACK_VERSION: VersionInfo = {
   name: "PortMetrics",
@@ -29,6 +31,20 @@ const ROLE_LABELS: Record<string, string> = {
   currency: "Währung",
   import_status: "Import-Status",
   activity_id: "Ghostfolio Activity-ID",
+};
+
+const METRIC_HINTS: Record<string, string> = {
+  nav: "Nettoinventarwert — aktueller Marktwert aller offenen Positionen.",
+  invested: "Summe der Einstandswerte (offene Lots × Stückkosten).",
+  unrealized: "Buchgewinn/-verlust: Marktwert minus Investiert.",
+  cagr: "Jährlich annualisierte Rendite über die gesamte Haltedauer.",
+  irr: "Geldgewichtete interne Verzinsung (IRR/MWR) der Cashflows inkl. End-NAV.",
+  simple: "Einfache Gesamtrendite: (Endwert − Kapitaleinsatz) / Kapitaleinsatz.",
+  maxdd: "Größter Kursrückgang vom Zwischenhoch zum folgenden Tief.",
+  vol: "Annualisierte Schwankungsbreite der Periodenrenditen.",
+  sharpe: "Überrendite je Einheit Risiko (vs. risikofreiem Zinssatz).",
+  tax: "Verbleibender steuerlicher Freibetrag im laufenden Jahr.",
+  dividends: "Summe erhaltener Dividenden über den betrachteten Zeitraum.",
 };
 
 function pct(value: string | null | undefined): string {
@@ -50,6 +66,62 @@ function signedClass(value: string | number | null | undefined): string {
   const n = typeof value === "number" ? value : Number(value);
   if (Number.isNaN(n) || n === 0) return "";
   return n > 0 ? "val-pos" : "val-neg";
+}
+
+function toggleSort(prev: SortState, key: string, defaultDir: SortDir = "desc"): SortState {
+  if (prev.key === key) {
+    return { key, dir: prev.dir === "asc" ? "desc" : "asc" };
+  }
+  return { key, dir: defaultDir };
+}
+
+function cmpScalar(a: unknown, b: unknown): number {
+  if (a == null && b == null) return 0;
+  if (a == null || a === "") return 1;
+  if (b == null || b === "") return -1;
+  const sa = String(a);
+  const sb = String(b);
+  const na = Number(sa);
+  const nb = Number(sb);
+  if (!Number.isNaN(na) && !Number.isNaN(nb) && sa.trim() !== "" && sb.trim() !== "") {
+    return na - nb;
+  }
+  return sa.localeCompare(sb, "de", { numeric: true });
+}
+
+function sortRows<T>(rows: T[], sort: SortState): T[] {
+  return [...rows].sort((ra, rb) => {
+    const recA = ra as Record<string, unknown>;
+    const recB = rb as Record<string, unknown>;
+    const c = cmpScalar(recA[sort.key], recB[sort.key]);
+    return sort.dir === "asc" ? c : -c;
+  });
+}
+
+function SortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+}: {
+  label: string;
+  column: string;
+  sort: SortState;
+  onSort: (column: string) => void;
+}) {
+  const active = sort.key === column;
+  return (
+    <th aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" className="th-sort" onClick={() => onSort(column)}>
+        {label}
+        {active ? (
+          <span className="th-sort-ind" aria-hidden>
+            {sort.dir === "asc" ? " ▲" : " ▼"}
+          </span>
+        ) : null}
+      </button>
+    </th>
+  );
 }
 
 function Panel({
@@ -196,6 +268,9 @@ export default function App() {
   const [allowanceDraft, setAllowanceDraft] = useState("1000");
   const [warnPctDraft, setWarnPctDraft] = useState("0.85");
   const [riskFreeDraft, setRiskFreeDraft] = useState("0");
+  const [cashflowSort, setCashflowSort] = useState<SortState>({ key: "date", dir: "desc" });
+  const [lotsSort, setLotsSort] = useState<SortState>({ key: "open_date", dir: "desc" });
+  const [positionsSort, setPositionsSort] = useState<SortState>({ key: "invested", dir: "desc" });
 
   const refresh = useCallback(async () => {
     setError("");
@@ -438,55 +513,55 @@ export default function App() {
         <div className="workspace">
           <Panel label="Kennzahlen" meta={`AS OF ${overview.as_of}`}>
             <div className="grid">
-              <div className="stat stat-hero">
+              <div className="stat stat-hero" title={METRIC_HINTS.nav}>
                 <span>NAV</span>
                 <strong className="mono">{money(overview.nav)}</strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.invested}>
                 <span>Investiert</span>
                 <strong className="mono">{money(overview.invested)}</strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.unrealized}>
                 <span>Unrealisiert</span>
                 <strong className={`mono ${signedClass(overview.unrealized_gain)}`}>
                   {money(overview.unrealized_gain)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.cagr}>
                 <span>CAGR</span>
                 <strong className={`mono ${signedClass(overview.cagr.cagr)}`}>
                   {pct(overview.cagr.cagr)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.irr}>
                 <span>IRR (MWR)</span>
                 <strong className={`mono ${signedClass(overview.mwr?.irr)}`}>
                   {pct(overview.mwr?.irr)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.simple}>
                 <span>Einfache Rendite</span>
                 <strong className={`mono ${signedClass(overview.mwr?.simple_return)}`}>
                   {pct(overview.mwr?.simple_return)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.maxdd}>
                 <span>Max Drawdown</span>
                 <strong className={`mono ${signedClass(overview.risk?.max_drawdown)}`}>
                   {pct(overview.risk?.max_drawdown)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.vol}>
                 <span>Volatilität</span>
                 <strong className="mono">{pct(overview.risk?.volatility)}</strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.sharpe}>
                 <span>Sharpe</span>
                 <strong className={`mono ${signedClass(overview.risk?.sharpe)}`}>
                   {overview.risk?.sharpe == null ? "—" : Number(overview.risk.sharpe).toFixed(2)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.tax}>
                 <span>Freibetrag rest ({overview.tax_allowance?.year ?? "—"})</span>
                 <strong
                   className={`mono ${overview.tax_allowance?.warn ? "val-neg" : signedClass(overview.tax_allowance?.remaining)}`}
@@ -494,7 +569,7 @@ export default function App() {
                   {money(overview.tax_allowance?.remaining)}
                 </strong>
               </div>
-              <div className="stat">
+              <div className="stat" title={METRIC_HINTS.dividends}>
                 <span>Dividenden</span>
                 <strong className="mono">{money(overview.dividends.total)}</strong>
               </div>
@@ -507,7 +582,7 @@ export default function App() {
               </p>
             ) : null}
           </Panel>
-          <Panel label="Perioden-Rendite" offset>
+          <Panel label="Perioden-Rendite">
             <div className="table-wrap">
               <table>
                 <thead>
@@ -539,12 +614,22 @@ export default function App() {
                 <table>
                   <thead>
                     <tr>
-                      <th>Datum</th>
-                      <th>Betrag</th>
+                      <SortHeader
+                        label="Datum"
+                        column="date"
+                        sort={cashflowSort}
+                        onSort={(column) => setCashflowSort((s) => toggleSort(s, column))}
+                      />
+                      <SortHeader
+                        label="Betrag"
+                        column="amount"
+                        sort={cashflowSort}
+                        onSort={(column) => setCashflowSort((s) => toggleSort(s, column))}
+                      />
                     </tr>
                   </thead>
                   <tbody>
-                    {overview.cashflows.map((cf, idx) => (
+                    {sortRows(overview.cashflows, cashflowSort).map((cf, idx) => (
                       <tr key={`${cf.date}-${idx}`}>
                         <td className="mono">{cf.date}</td>
                         <td className={`mono ${signedClass(cf.amount)}`}>{money(cf.amount)}</td>
@@ -564,18 +649,58 @@ export default function App() {
             <table>
               <thead>
                 <tr>
-                  <th>ISIN</th>
-                  <th>Datum</th>
-                  <th>Status</th>
-                  <th>Menge</th>
-                  <th>Einstand</th>
-                  <th>Marktkurs</th>
-                  <th>u. Gewinn</th>
-                  <th>u. %</th>
+                  <SortHeader
+                    label="ISIN"
+                    column="isin"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Datum"
+                    column="open_date"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Status"
+                    column="status"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Menge"
+                    column="open_qty"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Einstand"
+                    column="unit_cost"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Marktkurs"
+                    column="mark_price"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="u. Gewinn"
+                    column="unrealized_gain"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="u. %"
+                    column="unrealized_gain_pct"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
                 </tr>
               </thead>
               <tbody>
-                {lots.map((lot) => (
+                {sortRows(lots, lotsSort).map((lot) => (
                   <tr key={lot.id}>
                     <td className="mono">{lot.isin}</td>
                     <td className="mono">{lot.open_date}</td>
@@ -603,17 +728,52 @@ export default function App() {
             <table>
               <thead>
                 <tr>
-                  <th>ISIN</th>
-                  <th>Menge</th>
-                  <th>Investiert</th>
-                  <th>Marktwert</th>
-                  <th>Einfache Rendite</th>
-                  <th>IRR</th>
-                  <th>Max DD</th>
+                  <SortHeader
+                    label="ISIN"
+                    column="isin"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Menge"
+                    column="open_qty"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Investiert"
+                    column="invested"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Marktwert"
+                    column="market_value"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Einfache Rendite"
+                    column="simple_return"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="IRR"
+                    column="irr"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Max DD"
+                    column="max_drawdown"
+                    sort={positionsSort}
+                    onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
+                  />
                 </tr>
               </thead>
               <tbody>
-                {overview.positions.map((p) => (
+                {sortRows(overview.positions, positionsSort).map((p) => (
                   <tr key={p.isin}>
                     <td className="mono">{p.isin}</td>
                     <td className="mono">{p.open_qty}</td>

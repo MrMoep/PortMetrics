@@ -370,6 +370,7 @@ select {
   border-radius: var(--radius);
   background: var(--panel);
   box-shadow: 3px 3px 0 var(--line);
+  cursor: help;
 }
 
 .stat-hero {
@@ -435,6 +436,29 @@ th {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: var(--steel-deep);
+}
+
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.th-sort:hover {
+  color: var(--ink);
+}
+
+.th-sort-ind {
+  color: var(--accent);
 }
 
 .mono {

@@ -77,7 +77,7 @@ Hintergrund zusätzlich: **24px-Raster** über halbtransparente Linien (`--grid-
 
 | Screen | Struktur |
 |--------|----------|
-| Overview | Workspace: Kennzahlen (Hero-NAV) + Perioden-Tabelle (offset) |
+| Overview | Workspace: Kennzahlen (Hero-NAV, Tooltips) + Perioden-Tabelle (oben bündig); sortierbare Cashflow-/Lots-/Positions-Tabellen |
 | FIFO Lots / Positionen / Staging | Einzelpanel + dichte Tabelle |
 | Simulator | Split: Formular \| Ergebnispanel |
 | Settings | Ops-Panel (Jobs) + Paperless-Mapping-Panel |
