@@ -80,7 +80,12 @@ def wkn_map(session: Session) -> dict[str, str]:
     return {row.isin: row.wkn for row in rows}
 
 
-def resolve_isin_code(*, activity_isin: str | None, asset_key: str, symbol: str | None) -> str | None:
+def resolve_isin_code(
+    *,
+    activity_isin: str | None,
+    asset_key: str,
+    symbol: str | None,
+) -> str | None:
     if activity_isin:
         return normalize_isin(activity_isin)
     if looks_like_isin(asset_key):
