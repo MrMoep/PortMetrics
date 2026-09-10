@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   api,
   Lot,
@@ -12,8 +12,125 @@ import {
 } from "./api";
 
 type Tab = "overview" | "lots" | "positions" | "simulator" | "staging" | "settings";
+type SettingsSection = "ops" | "portfolio" | "paperless" | "ghostfolio";
 type SortDir = "asc" | "desc";
 type SortState = { key: string; dir: SortDir };
+
+const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
+  { id: "ops", label: "Wartung" },
+  { id: "portfolio", label: "Portfolio" },
+  { id: "paperless", label: "Paperless" },
+  { id: "ghostfolio", label: "Ghostfolio" },
+];
+
+const SETTINGS_SECTION_IDS = new Set<string>(SETTINGS_SECTIONS.map((s) => s.id));
+
+function parseSettingsHash(hash: string): SettingsSection | null {
+  const match = hash.match(/^#settings\/([a-z]+)$/i);
+  if (!match) return null;
+  const id = match[1].toLowerCase();
+  return SETTINGS_SECTION_IDS.has(id) ? (id as SettingsSection) : null;
+}
+
+function settingsHash(section: SettingsSection): string {
+  return `#settings/${section}`;
+}
+
+function sameIdNameList(a: PaperlessIdName[], b: PaperlessIdName[]): boolean {
+  if (a.length !== b.length) return false;
+  const ids = new Set(a.map((row) => row.id));
+  return b.every((row) => ids.has(row.id));
+}
+
+function SyncFilterPicker({
+  label,
+  items,
+  selected,
+  onChange,
+  emptyHint,
+}: {
+  label: string;
+  items: PaperlessIdName[];
+  selected: PaperlessIdName[];
+  onChange: (next: PaperlessIdName[]) => void;
+  emptyHint: string;
+}) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const selectedIds = new Set(selected.map((row) => row.id));
+  const matches = (item: PaperlessIdName) =>
+    !q ||
+    item.name.toLowerCase().includes(q) ||
+    String(item.id).includes(q);
+
+  const selectedVisible = selected.filter(matches);
+  const available = items.filter((item) => !selectedIds.has(item.id) && matches(item));
+
+  function add(item: PaperlessIdName) {
+    if (selectedIds.has(item.id)) return;
+    onChange([...selected, { id: item.id, name: item.name }]);
+  }
+
+  function remove(item: PaperlessIdName) {
+    onChange(selected.filter((row) => row.id !== item.id));
+  }
+
+  return (
+    <div className="filter-col">
+      <strong className="mono">{label}</strong>
+      <label className="filter-search">
+        <span className="visually-hidden">Filter {label}</span>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filtern…"
+        />
+      </label>
+      {items.length === 0 && <p className="muted">{emptyHint}</p>}
+      <div className="filter-bucket">
+        <div className="filter-bucket-head mono">
+          Ausgewählt ({selectedVisible.length}
+          {q && selected.length !== selectedVisible.length ? `/${selected.length}` : ""})
+        </div>
+        <div className="check-list check-list-selected">
+          {selectedVisible.length === 0 ? (
+            <p className="muted">{q ? "Keine Treffer." : "Keine Auswahl."}</p>
+          ) : (
+            selectedVisible.map((item) => (
+              <label key={item.id} className="check-row">
+                <input type="checkbox" checked onChange={() => remove(item)} />
+                <span>
+                  {item.name} <span className="muted mono">#{item.id}</span>
+                </span>
+              </label>
+            ))
+          )}
+        </div>
+      </div>
+      <div className="filter-bucket">
+        <div className="filter-bucket-head mono">
+          Verfügbar ({available.length}
+          {!q ? `/${items.length - selected.length}` : ""})
+        </div>
+        <div className="check-list check-list-available">
+          {items.length > 0 && available.length === 0 ? (
+            <p className="muted">{q ? "Keine Treffer." : "Alles ausgewählt."}</p>
+          ) : (
+            available.map((item) => (
+              <label key={item.id} className="check-row">
+                <input type="checkbox" checked={false} onChange={() => add(item)} />
+                <span>
+                  {item.name} <span className="muted mono">#{item.id}</span>
+                </span>
+              </label>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const FALLBACK_VERSION: VersionInfo = {
   name: "PortMetrics",
@@ -301,7 +418,13 @@ const OPS_ACTIONS: {
 ];
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const initialSettingsSection = parseSettingsHash(
+    typeof window !== "undefined" ? window.location.hash : "",
+  );
+  const [tab, setTab] = useState<Tab>(initialSettingsSection ? "settings" : "overview");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>(
+    initialSettingsSection ?? "ops",
+  );
   const [overview, setOverview] = useState<Overview | null>(null);
   const [lots, setLots] = useState<Lot[]>([]);
   const [staging, setStaging] = useState<StagingItem[]>([]);
@@ -416,6 +539,156 @@ export default function App() {
     }
   }, [tab, loadSettings]);
 
+  function applyPortfolioDrafts(portfolio: PortfolioSettings) {
+    setAllowanceDraft(portfolio.tax_allowance_eur);
+    setWarnPctDraft(portfolio.tax_warn_pct);
+    setRiskFreeDraft(portfolio.risk_free_rate);
+    setAssetIdPrefDraft(portfolio.asset_id_preference || "symbol");
+  }
+
+  function applyPaperlessDrafts(cfg: PaperlessSettings) {
+    const draft: Record<string, string> = {};
+    for (const role of cfg.roles) {
+      draft[role] = cfg.field_map[role] != null ? String(cfg.field_map[role]) : "";
+    }
+    setFieldMapDraft(draft);
+    setSyncTagsDraft(cfg.sync_tags ?? []);
+    setSyncDocTypesDraft(cfg.sync_document_types ?? []);
+    setAccountDraft(cfg.ghostfolio_default_account_id ?? "");
+    setDataSourceDraft(cfg.ghostfolio_data_source || "YAHOO");
+    setPublicUrlDraft(cfg.public_url ?? "");
+  }
+
+  function isPortfolioDirty(): boolean {
+    if (!portfolioSettings) return false;
+    return (
+      allowanceDraft.trim() !== portfolioSettings.tax_allowance_eur ||
+      warnPctDraft.trim() !== portfolioSettings.tax_warn_pct ||
+      riskFreeDraft.trim() !== portfolioSettings.risk_free_rate ||
+      assetIdPrefDraft !== (portfolioSettings.asset_id_preference || "symbol")
+    );
+  }
+
+  function isPaperlessDirty(): boolean {
+    if (!paperlessSettings) return false;
+    for (const role of paperlessSettings.roles) {
+      const saved =
+        paperlessSettings.field_map[role] != null
+          ? String(paperlessSettings.field_map[role])
+          : "";
+      if ((fieldMapDraft[role] ?? "") !== saved) return true;
+    }
+    if (!sameIdNameList(syncTagsDraft, paperlessSettings.sync_tags ?? [])) return true;
+    if (!sameIdNameList(syncDocTypesDraft, paperlessSettings.sync_document_types ?? [])) {
+      return true;
+    }
+    return (publicUrlDraft.trim() || "") !== (paperlessSettings.public_url ?? "");
+  }
+
+  function isGhostfolioDirty(): boolean {
+    if (!paperlessSettings) return false;
+    const savedAccount = paperlessSettings.ghostfolio_default_account_id ?? "";
+    const savedSource = paperlessSettings.ghostfolio_data_source || "YAHOO";
+    return (
+      accountDraft.trim() !== savedAccount ||
+      (dataSourceDraft.trim() || "YAHOO") !== savedSource
+    );
+  }
+
+  function isSectionDirty(section: SettingsSection): boolean {
+    if (section === "portfolio") return isPortfolioDirty();
+    if (section === "paperless") return isPaperlessDirty();
+    if (section === "ghostfolio") return isGhostfolioDirty();
+    return false;
+  }
+
+  function discardSectionDrafts(section: SettingsSection) {
+    if (section === "portfolio" && portfolioSettings) {
+      applyPortfolioDrafts(portfolioSettings);
+    }
+    if ((section === "paperless" || section === "ghostfolio") && paperlessSettings) {
+      applyPaperlessDrafts(paperlessSettings);
+    }
+  }
+
+  function confirmDiscard(section: SettingsSection): boolean {
+    if (!isSectionDirty(section)) return true;
+    const ok = window.confirm("Ungespeicherte Änderungen verwerfen und fortfahren?");
+    if (ok) discardSectionDrafts(section);
+    return ok;
+  }
+
+  function writeSettingsHash(section: SettingsSection) {
+    const next = settingsHash(section);
+    if (window.location.hash !== next) {
+      history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}${next}`,
+      );
+    }
+  }
+
+  function clearSettingsHash() {
+    if (window.location.hash.startsWith("#settings")) {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+  }
+
+  function requestTabChange(next: Tab) {
+    if (next === tab) return;
+    if (tab === "settings" && next !== "settings") {
+      if (!confirmDiscard(settingsSection)) return;
+      clearSettingsHash();
+    }
+    if (next === "settings") {
+      setSettingsSection("ops");
+      writeSettingsHash("ops");
+    }
+    setTab(next);
+  }
+
+  function requestSettingsSection(next: SettingsSection) {
+    if (next === settingsSection) return;
+    if (!confirmDiscard(settingsSection)) return;
+    setSettingsSection(next);
+    writeSettingsHash(next);
+  }
+
+  const settingsNavRef = useRef({
+    tab,
+    settingsSection,
+    confirmDiscard,
+    writeSettingsHash,
+  });
+  settingsNavRef.current = {
+    tab,
+    settingsSection,
+    confirmDiscard,
+    writeSettingsHash,
+  };
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const section = parseSettingsHash(window.location.hash);
+      if (!section) return;
+      const nav = settingsNavRef.current;
+      if (nav.tab !== "settings") {
+        setTab("settings");
+        setSettingsSection(section);
+        return;
+      }
+      if (section === nav.settingsSection) return;
+      if (!nav.confirmDiscard(nav.settingsSection)) {
+        nav.writeSettingsHash(nav.settingsSection);
+        return;
+      }
+      setSettingsSection(section);
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
   async function runAction(label: string, fn: () => Promise<unknown>) {
     setError("");
     setStatus(`${label}…`);
@@ -447,36 +720,64 @@ export default function App() {
     }
   }
 
-  async function onSaveSettings(event: FormEvent<HTMLFormElement>) {
+  async function onSavePortfolio(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    setStatus("Einstellungen speichern…");
+    setStatus("Portfolio speichern…");
+    try {
+      const portfolio = await api.savePortfolioSettings({
+        tax_allowance_eur: allowanceDraft.trim() || "1000",
+        tax_warn_pct: warnPctDraft.trim() || "0.85",
+        risk_free_rate: riskFreeDraft.trim() || "0",
+        asset_id_preference: assetIdPrefDraft,
+      });
+      setPortfolioSettings(portfolio);
+      applyPortfolioDrafts(portfolio);
+      setStatus("Portfolio gespeichert");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
+  async function onSavePaperless(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setStatus("Paperless speichern…");
     try {
       const field_map: Record<string, number | null> = {};
       for (const [role, raw] of Object.entries(fieldMapDraft)) {
         field_map[role] = raw.trim() === "" ? null : Number(raw);
       }
-      const [saved, portfolio] = await Promise.all([
-        api.savePaperlessSettings({
-          field_map,
-          sync_tags: syncTagsDraft,
-          sync_document_types: syncDocTypesDraft,
-          ghostfolio_default_account_id: accountDraft.trim() || null,
-          ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
-          public_url: publicUrlDraft.trim() || null,
-        }),
-        api.savePortfolioSettings({
-          tax_allowance_eur: allowanceDraft.trim() || "1000",
-          tax_warn_pct: warnPctDraft.trim() || "0.85",
-          risk_free_rate: riskFreeDraft.trim() || "0",
-          asset_id_preference: assetIdPrefDraft,
-        }),
-      ]);
+      const saved = await api.savePaperlessSettings({
+        field_map,
+        sync_tags: syncTagsDraft,
+        sync_document_types: syncDocTypesDraft,
+        public_url: publicUrlDraft.trim() || null,
+      });
       setPaperlessSettings(saved);
-      setPortfolioSettings(portfolio);
-      setSyncTagsDraft(saved.sync_tags ?? []);
-      setSyncDocTypesDraft(saved.sync_document_types ?? []);
-      setStatus("Einstellungen gespeichert");
+      applyPaperlessDrafts(saved);
+      setStatus("Paperless gespeichert");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
+  async function onSaveGhostfolio(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setStatus("Ghostfolio-Defaults speichern…");
+    try {
+      const saved = await api.savePaperlessSettings({
+        ghostfolio_default_account_id: accountDraft.trim() || null,
+        ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
+      });
+      setPaperlessSettings(saved);
+      applyPaperlessDrafts(saved);
+      setStatus("Ghostfolio-Defaults gespeichert");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -503,18 +804,6 @@ export default function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("");
-    }
-  }
-
-  function toggleIdName(
-    list: PaperlessIdName[],
-    item: PaperlessIdName,
-    setter: (next: PaperlessIdName[]) => void,
-  ) {
-    if (list.some((row) => row.id === item.id)) {
-      setter(list.filter((row) => row.id !== item.id));
-    } else {
-      setter([...list, { id: item.id, name: item.name }]);
     }
   }
 
@@ -655,7 +944,7 @@ export default function App() {
             key={id}
             type="button"
             className={tab === id ? "active" : ""}
-            onClick={() => setTab(id)}
+            onClick={() => requestTabChange(id)}
           >
             {label}
           </button>
@@ -1130,239 +1419,260 @@ export default function App() {
       )}
 
       {tab === "settings" && (
-        <>
-          <Panel label="Wartung / Ops">
-            <p className="muted">
-              Server-Jobs zum Nachziehen und Neuaufbauen. Dieselben Aktionen liegen als kleine Icons
-              rechts in der Topbar — hier mit Labels und Kurzhinweisen.
-            </p>
-            <div className="ops-list">
-              {OPS_ACTIONS.map((action) => (
-                <div key={action.id} className="ops-row">
-                  <div className="ops-copy">
-                    <strong>{action.label}</strong>
-                    <span className="muted">{action.hint}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void runAction(action.label, action.run)}
-                  >
-                    Ausführen
-                  </button>
-                </div>
-              ))}
-            </div>
-          </Panel>
-          <Panel label="Portfolio / Steuer & Risiko">
-            <p className="muted">
-              Freibetrag, risikofreier Zins für Sharpe und Anzeige-Kennung (Symbol/WKN/ISIN) für Lots
-              und Positionen. Werte sind Schätzungen — keine Steuerberatung. Speichern unten speichert
-              Paperless- und Portfolio-Settings gemeinsam
-              {portfolioSettings
-                ? ` (aktuell Freibetrag ${showMode ? "0,00" : portfolioSettings.tax_allowance_eur} EUR).`
-                : "."}
-            </p>
-          </Panel>
-          <Panel label="Einstellungen / Paperless">
-            <p className="muted">
-              Paperless-Custom-Fields den PortMetrics-Rollen zuordnen. API-URL/Token/Webhook-Secret
-              bleiben in der Env; Mapping, Tag, öffentliche Web-URL und Ghostfolio-Defaults werden in
-              der Datenbank gespeichert. Handelsdatum = Dokumentdatum in Paperless; Währung kommt aus
-              den Monetary-Feldern.
-            </p>
-            {paperlessSettings && (
+        <div className="settings-workspace">
+          <nav className="nav subnav" aria-label="Einstellungen">
+            {SETTINGS_SECTIONS.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                className={settingsSection === section.id ? "active" : ""}
+                onClick={() => requestSettingsSection(section.id)}
+              >
+                {section.label}
+              </button>
+            ))}
+          </nav>
+
+          {settingsSection === "ops" && (
+            <Panel label="Wartung / Ops">
               <p className="muted">
-                Webhook: <span className="mono">{paperlessSettings.webhook_path}</span>
-                {" · "}
-                Secret:{" "}
-                {paperlessSettings.webhook_secret_configured ? "konfiguriert" : "fehlt (Env)"}
-                {" · "}
-                Scheduler-Pull:{" "}
-                {paperlessSettings.paperless_sync_interval_minutes > 0
-                  ? `alle ${paperlessSettings.paperless_sync_interval_minutes} Min`
-                  : "aus"}
+                Server-Jobs zum Nachziehen und Neuaufbauen. Dieselben Aktionen liegen als kleine Icons
+                rechts in der Topbar — hier mit Labels und Kurzhinweisen. Full Sync Paperless bleibt
+                unter Staging (alle Seiten); hier nur Teilsync.
               </p>
-            )}
-            {paperlessSettings && !paperlessSettings.paperless_configured && (
-              <p className="status error">
-                PAPERLESS_URL / PAPERLESS_TOKEN sind nicht konfiguriert — Custom Fields können nicht
-                geladen werden.
-              </p>
-            )}
-            <form className="form form-wide" onSubmit={(e) => void onSaveSettings(e)}>
-              <label>
-                Steuer-Freibetrag (EUR / Jahr)
-                <input
-                  value={allowanceDraft}
-                  onChange={(e) => setAllowanceDraft(e.target.value)}
-                  placeholder="1000"
-                />
-              </label>
-              <label>
-                Warnschwelle (0–1, z.B. 0.85 = 85%)
-                <input
-                  value={warnPctDraft}
-                  onChange={(e) => setWarnPctDraft(e.target.value)}
-                  placeholder="0.85"
-                />
-              </label>
-              <label>
-                Risikofreier Zins (annualisiert, z.B. 0.02)
-                <input
-                  value={riskFreeDraft}
-                  onChange={(e) => setRiskFreeDraft(e.target.value)}
-                  placeholder="0"
-                />
-              </label>
-              <label>
-                Kennung in Lots / Positionen
-                <select
-                  value={assetIdPrefDraft}
-                  onChange={(e) =>
-                    setAssetIdPrefDraft(e.target.value as "symbol" | "wkn" | "isin")
-                  }
-                >
-                  <option value="symbol">Symbol (Ghostfolio-Standard)</option>
-                  <option value="wkn">WKN (aus Paperless-Mapping)</option>
-                  <option value="isin">ISIN</option>
-                </select>
-                <span className="muted">
-                  Fallback-Kette: gewählte Kennung → Symbol/ISIN/WKN → Asset-Key. WKN wird gelernt,
-                  sobald ein Paperless-Beleg ISIN und WKN enthält.
-                </span>
-              </label>
-              <div className="settings-actions">
-                <button type="button" onClick={() => void onTestPaperless()}>
-                  Verbindung testen
-                </button>
-                <button type="button" onClick={() => void loadSettings()}>
-                  Neu laden
-                </button>
+              <div className="ops-list">
+                {OPS_ACTIONS.map((action) => (
+                  <div key={action.id} className="ops-row">
+                    <div className="ops-copy">
+                      <strong>{action.label}</strong>
+                      <span className="muted">{action.hint}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void runAction(action.label, action.run)}
+                    >
+                      Ausführen
+                    </button>
+                  </div>
+                ))}
               </div>
-              {(paperlessSettings?.role_meta ?? FALLBACK_ROLE_META).map((meta) => (
-                <label key={meta.role}>
-                  {meta.label}
-                  <span className="muted">
-                    {" "}
-                    — {meta.required ? "Pflicht" : "Optional"}
-                    {meta.hint ? ` · ${meta.hint}` : ""}
-                  </span>
+              <p className="muted" style={{ marginTop: "0.75rem" }}>
+                Full Sync inkl. Fortschritt:{" "}
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => requestTabChange("staging")}
+                >
+                  Staging öffnen
+                </button>
+                .
+              </p>
+            </Panel>
+          )}
+
+          {settingsSection === "portfolio" && (
+            <Panel label="Portfolio / Steuer & Risiko">
+              <p className="muted">
+                Freibetrag, risikofreier Zins für Sharpe und Anzeige-Kennung (Symbol/WKN/ISIN) für Lots
+                und Positionen. Werte sind Schätzungen — keine Steuerberatung
+                {portfolioSettings
+                  ? ` (aktuell Freibetrag ${showMode ? "0,00" : portfolioSettings.tax_allowance_eur} EUR).`
+                  : "."}
+              </p>
+              <form className="form form-wide" onSubmit={(e) => void onSavePortfolio(e)}>
+                <label>
+                  Steuer-Freibetrag (EUR / Jahr)
+                  <input
+                    value={allowanceDraft}
+                    onChange={(e) => setAllowanceDraft(e.target.value)}
+                    placeholder="1000"
+                  />
+                </label>
+                <label>
+                  Warnschwelle (0–1, z.B. 0.85 = 85%)
+                  <input
+                    value={warnPctDraft}
+                    onChange={(e) => setWarnPctDraft(e.target.value)}
+                    placeholder="0.85"
+                  />
+                </label>
+                <label>
+                  Risikofreier Zins (annualisiert, z.B. 0.02)
+                  <input
+                    value={riskFreeDraft}
+                    onChange={(e) => setRiskFreeDraft(e.target.value)}
+                    placeholder="0"
+                  />
+                </label>
+                <label>
+                  Kennung in Lots / Positionen
                   <select
-                    value={fieldMapDraft[meta.role] ?? ""}
+                    value={assetIdPrefDraft}
                     onChange={(e) =>
-                      setFieldMapDraft((prev) => ({ ...prev, [meta.role]: e.target.value }))
+                      setAssetIdPrefDraft(e.target.value as "symbol" | "wkn" | "isin")
                     }
                   >
-                    <option value="">— nicht zugeordnet —</option>
-                    {customFields.map((field) => (
-                      <option key={field.id} value={String(field.id)}>
-                        {field.name ?? `Field #${field.id}`} (#{field.id})
-                      </option>
-                    ))}
+                    <option value="symbol">Symbol (Ghostfolio-Standard)</option>
+                    <option value="wkn">WKN (aus Paperless-Mapping)</option>
+                    <option value="isin">ISIN</option>
                   </select>
+                  <span className="muted">
+                    Fallback-Kette: gewählte Kennung → Symbol/ISIN/WKN → Asset-Key. WKN wird gelernt,
+                    sobald ein Paperless-Beleg ISIN und WKN enthält.
+                  </span>
                 </label>
-              ))}
-              {paperlessSettings?.notes && (
-                <p className="muted">{Object.values(paperlessSettings.notes).join(" · ")}</p>
-              )}
-              <label>
-                Paperless Web-URL (Browser)
-                <input
-                  value={publicUrlDraft}
-                  onChange={(e) => setPublicUrlDraft(e.target.value)}
-                  placeholder="https://paperless.example.com"
-                />
-                <span className="muted">
-                  Für Doc-Links in Staging und FIFO-Lots. Fallback: PAPERLESS_URL aus Env
-                  {paperlessSettings?.document_base_url
-                    ? ` (aktuell ${paperlessSettings.document_base_url})`
-                    : ""}
-                  .
-                </span>
-              </label>
-              <fieldset className="filter-fieldset">
-                <legend>Sync-Filter (Tags / Dokumententypen)</legend>
+                <button className="primary" type="submit">
+                  Speichern
+                </button>
+              </form>
+            </Panel>
+          )}
+
+          {settingsSection === "paperless" && (
+            <Panel label="Paperless">
+              <p className="muted">
+                Custom-Fields den PortMetrics-Rollen zuordnen. API-URL/Token/Webhook-Secret bleiben in
+                der Env; Mapping, Sync-Filter und öffentliche Web-URL speichern in der Datenbank.
+                Handelsdatum = Dokumentdatum in Paperless; Währung kommt aus den Monetary-Feldern.
+              </p>
+              {paperlessSettings && (
                 <p className="muted">
-                  Mehrere Tags = ODER, mehrere Dokumententypen = ODER; Tags und Typen zusammen =
-                  UND. Speicherung als ID (+ Name zur Anzeige). Teilsync: neueste ≤100 (auch ohne
-                  Filter). Full Sync: alle Seiten — ohne Filter erscheint eine Warnung. Webhook
-                  nutzt diesen Filter nicht, prüft aber weiterhin Pflichtfelder.
+                  Webhook: <span className="mono">{paperlessSettings.webhook_path}</span>
+                  {" · "}
+                  Secret:{" "}
+                  {paperlessSettings.webhook_secret_configured ? "konfiguriert" : "fehlt (Env)"}
+                  {" · "}
+                  Scheduler-Pull:{" "}
+                  {paperlessSettings.paperless_sync_interval_minutes > 0
+                    ? `alle ${paperlessSettings.paperless_sync_interval_minutes} Min`
+                    : "aus"}
                 </p>
-                {paperlessSettings?.tag ? (
-                  <p className="muted">
-                    Legacy-Tag aus Env/Altbestand: <span className="mono">{paperlessSettings.tag}</span>{" "}
-                    (wird beim Speichern der ID-Filter abgelöst).
-                  </p>
-                ) : null}
-                <div className="filter-grid">
-                  <div>
-                    <strong className="mono">Tags</strong>
-                    <div className="check-list">
-                      {paperlessTags.length === 0 && (
-                        <p className="muted">Keine Tags geladen — Verbindung testen.</p>
-                      )}
-                      {paperlessTags.map((tag) => (
-                        <label key={tag.id} className="check-row">
-                          <input
-                            type="checkbox"
-                            checked={syncTagsDraft.some((row) => row.id === tag.id)}
-                            onChange={() =>
-                              toggleIdName(syncTagsDraft, tag, setSyncTagsDraft)
-                            }
-                          />
-                          <span>
-                            {tag.name} <span className="muted mono">#{tag.id}</span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <strong className="mono">Dokumententypen</strong>
-                    <div className="check-list">
-                      {paperlessDocTypes.length === 0 && (
-                        <p className="muted">Keine Typen geladen — Verbindung testen.</p>
-                      )}
-                      {paperlessDocTypes.map((docType) => (
-                        <label key={docType.id} className="check-row">
-                          <input
-                            type="checkbox"
-                            checked={syncDocTypesDraft.some((row) => row.id === docType.id)}
-                            onChange={() =>
-                              toggleIdName(syncDocTypesDraft, docType, setSyncDocTypesDraft)
-                            }
-                          />
-                          <span>
-                            {docType.name} <span className="muted mono">#{docType.id}</span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+              )}
+              {paperlessSettings && !paperlessSettings.paperless_configured && (
+                <p className="status error">
+                  PAPERLESS_URL / PAPERLESS_TOKEN sind nicht konfiguriert — Custom Fields können nicht
+                  geladen werden.
+                </p>
+              )}
+              <form className="form form-filters" onSubmit={(e) => void onSavePaperless(e)}>
+                <div className="settings-actions">
+                  <button type="button" onClick={() => void onTestPaperless()}>
+                    Verbindung testen
+                  </button>
+                  <button type="button" onClick={() => void loadSettings()}>
+                    Neu laden
+                  </button>
                 </div>
-              </fieldset>
-              <label>
-                Ghostfolio Default Account-ID
-                <input
-                  value={accountDraft}
-                  onChange={(e) => setAccountDraft(e.target.value)}
-                  placeholder="UUID"
-                />
-              </label>
-              <label>
-                Ghostfolio Data Source
-                <input
-                  value={dataSourceDraft}
-                  onChange={(e) => setDataSourceDraft(e.target.value)}
-                  placeholder="YAHOO"
-                />
-              </label>
-              <button className="primary" type="submit">
-                Speichern
-              </button>
-            </form>
-          </Panel>
-        </>
+                {(paperlessSettings?.role_meta ?? FALLBACK_ROLE_META).map((meta) => (
+                  <label key={meta.role}>
+                    {meta.label}
+                    <span className="muted">
+                      {" "}
+                      — {meta.required ? "Pflicht" : "Optional"}
+                      {meta.hint ? ` · ${meta.hint}` : ""}
+                    </span>
+                    <select
+                      value={fieldMapDraft[meta.role] ?? ""}
+                      onChange={(e) =>
+                        setFieldMapDraft((prev) => ({ ...prev, [meta.role]: e.target.value }))
+                      }
+                    >
+                      <option value="">— nicht zugeordnet —</option>
+                      {customFields.map((field) => (
+                        <option key={field.id} value={String(field.id)}>
+                          {field.name ?? `Field #${field.id}`} (#{field.id})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+                {paperlessSettings?.notes && (
+                  <p className="muted">{Object.values(paperlessSettings.notes).join(" · ")}</p>
+                )}
+                <label>
+                  Paperless Web-URL (Browser)
+                  <input
+                    value={publicUrlDraft}
+                    onChange={(e) => setPublicUrlDraft(e.target.value)}
+                    placeholder="https://paperless.example.com"
+                  />
+                  <span className="muted">
+                    Für Doc-Links in Staging und FIFO-Lots. Fallback: PAPERLESS_URL aus Env
+                    {paperlessSettings?.document_base_url
+                      ? ` (aktuell ${paperlessSettings.document_base_url})`
+                      : ""}
+                    .
+                  </span>
+                </label>
+                <fieldset className="filter-fieldset">
+                  <legend>Sync-Filter (Tags / Dokumententypen)</legend>
+                  <p className="muted">
+                    Mehrere Tags = ODER, mehrere Dokumententypen = ODER; Tags und Typen zusammen =
+                    UND. Speicherung als ID (+ Name zur Anzeige). Teilsync: neueste ≤100 (auch ohne
+                    Filter). Full Sync: alle Seiten — ohne Filter erscheint eine Warnung. Webhook
+                    nutzt diesen Filter nicht, prüft aber weiterhin Pflichtfelder.
+                  </p>
+                  {paperlessSettings?.tag ? (
+                    <p className="muted">
+                      Legacy-Tag aus Env/Altbestand:{" "}
+                      <span className="mono">{paperlessSettings.tag}</span> (wird beim Speichern der
+                      ID-Filter abgelöst).
+                    </p>
+                  ) : null}
+                  <div className="filter-grid">
+                    <SyncFilterPicker
+                      label="Tags"
+                      items={paperlessTags}
+                      selected={syncTagsDraft}
+                      onChange={setSyncTagsDraft}
+                      emptyHint="Keine Tags geladen — Verbindung testen."
+                    />
+                    <SyncFilterPicker
+                      label="Dokumententypen"
+                      items={paperlessDocTypes}
+                      selected={syncDocTypesDraft}
+                      onChange={setSyncDocTypesDraft}
+                      emptyHint="Keine Typen geladen — Verbindung testen."
+                    />
+                  </div>
+                </fieldset>
+                <button className="primary" type="submit">
+                  Speichern
+                </button>
+              </form>
+            </Panel>
+          )}
+
+          {settingsSection === "ghostfolio" && (
+            <Panel label="Ghostfolio">
+              <p className="muted">
+                Defaults für den Paperless→Ghostfolio-Import (Account und Kursquelle). Speichern
+                schreibt weiterhin in die Paperless-Settings (kein eigener Backend-Key).
+              </p>
+              <form className="form form-wide" onSubmit={(e) => void onSaveGhostfolio(e)}>
+                <label>
+                  Ghostfolio Default Account-ID
+                  <input
+                    value={accountDraft}
+                    onChange={(e) => setAccountDraft(e.target.value)}
+                    placeholder="UUID"
+                  />
+                </label>
+                <label>
+                  Ghostfolio Data Source
+                  <input
+                    value={dataSourceDraft}
+                    onChange={(e) => setDataSourceDraft(e.target.value)}
+                    placeholder="YAHOO"
+                  />
+                </label>
+                <button className="primary" type="submit">
+                  Speichern
+                </button>
+              </form>
+            </Panel>
+          )}
+        </div>
       )}
     </div>
   );
