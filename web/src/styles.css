@@ -590,7 +590,7 @@ th {
   max-width: 960px;
 }
 
-.form label {
+.form label:not(.check-row) {
   display: grid;
   gap: 6px;
   color: var(--muted);
@@ -600,7 +600,7 @@ th {
   text-transform: uppercase;
 }
 
-.form input,
+.form input:not([type="checkbox"]),
 .form select {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -612,14 +612,14 @@ th {
   box-shadow: none;
 }
 
-.form input:focus,
+.form input:not([type="checkbox"]):focus,
 .form select:focus {
   outline: 2px solid var(--accent);
   outline-offset: 0;
 }
 
 @media (prefers-color-scheme: dark) {
-  .form input,
+  .form input:not([type="checkbox"]),
   .form select {
     background: var(--steel-deep);
   }
@@ -729,16 +729,47 @@ th {
 
 .check-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   font-size: 0.92rem;
   text-transform: none;
   letter-spacing: normal;
   color: var(--ink);
+  font-family: var(--font-ui);
+  font-weight: 400;
 }
 
-.check-row input {
-  margin-top: 3px;
+.form .check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 0.92rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.check-row input[type="checkbox"],
+.form .check-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  accent-color: var(--accent);
+}
+
+.check-row > span {
+  min-width: 0;
+  flex: 1;
+  line-height: 1.35;
 }
 
 .ops-list {
