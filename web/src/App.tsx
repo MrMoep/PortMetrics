@@ -776,6 +776,7 @@ export default function App() {
                     sort={lotsSort}
                     onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
                   />
+                  <th>Beleg</th>
                 </tr>
               </thead>
               <tbody>
@@ -792,6 +793,27 @@ export default function App() {
                     </td>
                     <td className={`mono ${signedClass(lot.unrealized_gain_pct, showMode)}`}>
                       {pctPoints(lot.unrealized_gain_pct, showMode)}
+                    </td>
+                    <td>
+                      {lot.paperless_doc_id != null ? (
+                        <div className="doc-cell">
+                          <span className="mono">{lot.paperless_doc_id}</span>
+                          {paperlessSettings?.document_base_url ? (
+                            <a
+                              className="doc-link"
+                              href={`${paperlessSettings.document_base_url}/documents/${lot.paperless_doc_id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={`Paperless Dokument #${lot.paperless_doc_id}`}
+                              aria-label={`Paperless Dokument ${lot.paperless_doc_id} öffnen`}
+                            >
+                              <Icon name="paperless" />
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -876,11 +898,11 @@ export default function App() {
       )}
 
       {tab === "staging" && (
-        <Panel label="Staging Queue" meta={`${staging.length} EINTRÄGE`}>
+        <Panel label="Staging Queue" meta={`${staging.length} OFFEN`}>
             <p className="muted">
-              Review-Queue aus Paperless. Confirm importiert nach Ghostfolio; danach Sync ausführen.
-              Typ OTHER ist sichtbar, aber nicht importierbar — Typ in Paperless korrigieren und
-              erneut syncen.
+              Offene Review-Queue aus Paperless. Confirm importiert nach Ghostfolio; danach Sync
+              ausführen. Erledigte Einträge (confirm/reject) erscheinen nicht mehr — auch nicht bei
+              erneutem Webhook. Typ OTHER ist sichtbar, aber nicht importierbar.
             </p>
           <div className="table-wrap">
             <table>
@@ -959,7 +981,7 @@ export default function App() {
               </tbody>
             </table>
           </div>
-          {staging.length === 0 && <p className="muted">Keine Staging-Einträge.</p>}
+          {staging.length === 0 && <p className="muted">Keine offenen Staging-Einträge.</p>}
         </Panel>
       )}
 
@@ -1166,7 +1188,7 @@ export default function App() {
                   placeholder="https://paperless.example.com"
                 />
                 <span className="muted">
-                  Für Doc-Links im Staging. Fallback: PAPERLESS_URL aus Env
+                  Für Doc-Links in Staging und FIFO-Lots. Fallback: PAPERLESS_URL aus Env
                   {paperlessSettings?.document_base_url
                     ? ` (aktuell ${paperlessSettings.document_base_url})`
                     : ""}

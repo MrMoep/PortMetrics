@@ -134,7 +134,11 @@ Unvollständige Felder werden übersprungen (`action=skipped`); manueller Sync b
 
 |---------|------|-------|
 
-| `GET` | `/api/staging?status=pending` | Review-Queue |
+| `GET` | `/api/staging` | Offene Review-Queue (`pending` + `error`) |
+
+| `GET` | `/api/staging?status=pending` | Nur pending |
+
+| `GET` | `/api/staging?status=all` | Alle inkl. imported/rejected |
 
 | `POST` | `/api/staging/sync` | Paperless → Staging (manuell) |
 

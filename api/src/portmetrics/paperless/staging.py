@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from portmetrics.assets.identifiers import backfill_from_staging, upsert_from_payload
-from portmetrics.db.models import DocumentLink, StagingImport
+from portmetrics.db.models import Activity, DocumentLink, Lot, StagingImport
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.paperless.client import PaperlessClient
 from portmetrics.paperless.mapping import (
@@ -244,17 +244,17 @@ def _upsert_document_from_fields(
     row = session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == doc_id))
     if row and row.status == STATUS_IMPORTED:
         return DocumentIngestResult(doc_id, "skipped", "already imported locally", row.id)
+    if row and row.status == STATUS_REJECTED:
+        return DocumentIngestResult(doc_id, "skipped", "already rejected locally", row.id)
     if row is None:
         row = StagingImport(paperless_doc_id=doc_id, payload=payload, status=STATUS_PENDING)
         session.add(row)
         session.flush()
     else:
+        # pending / error: refresh payload and re-open for review
         row.payload = payload
-        if row.status == STATUS_REJECTED:
-            pass
-        elif row.status != STATUS_IMPORTED:
-            row.status = STATUS_PENDING
-            row.error = None
+        row.status = STATUS_PENDING
+        row.error = None
         session.flush()
     return DocumentIngestResult(doc_id, "upserted", staging_id=row.id)
 
@@ -347,9 +347,20 @@ def list_staging(
     *,
     status: str | None = None,
 ) -> list[dict[str, Any]]:
+    """List staging rows.
+
+    Without ``status``, returns the open review queue (pending + error).
+    Pass ``status=all`` for every row, or a concrete status to filter.
+    """
     stmt = select(StagingImport).order_by(StagingImport.id.desc())
-    if status:
+    if status == "all":
+        pass
+    elif status:
         stmt = stmt.where(StagingImport.status == status)
+    else:
+        stmt = stmt.where(
+            StagingImport.status.notin_([STATUS_IMPORTED, STATUS_REJECTED])
+        )
     rows = session.scalars(stmt).all()
     return [_serialize_staging(row) for row in rows]
 
@@ -442,11 +453,16 @@ def confirm_staging(
     if activity_id:
         row.gf_activity_id = activity_id
         local_activity_id = _local_activity_pk(session, activity_id)
+        lot_id = None
+        if local_activity_id is not None:
+            lot = session.scalar(select(Lot).where(Lot.activity_id == local_activity_id))
+            if lot is not None:
+                lot_id = lot.id
         session.add(
             DocumentLink(
                 paperless_doc_id=row.paperless_doc_id,
                 activity_id=local_activity_id,
-                lot_id=None,
+                lot_id=lot_id,
                 link_type="source",
             )
         )
@@ -466,7 +482,5 @@ def _extract_activity_id(imported: dict[str, Any]) -> UUID | None:
 
 
 def _local_activity_pk(session: Session, gf_activity_id: UUID) -> int | None:
-    from portmetrics.db.models import Activity
-
     row = session.scalar(select(Activity).where(Activity.gf_activity_id == gf_activity_id))
     return row.id if row else None
