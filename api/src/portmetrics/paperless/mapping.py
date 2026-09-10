@@ -84,10 +84,35 @@ def _normalize_public_url(value: Any) -> str | None:
     return text or None
 
 
+def _normalize_id_name_list(value: Any) -> list[dict[str, Any]]:
+    """Persist [{id, name}, ...] for tags / document types (ID is source of truth)."""
+    if not value:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("expected a list of {id, name} objects")
+    out: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("each filter entry must be an object with id and name")
+        raw_id = item.get("id")
+        if raw_id is None or str(raw_id).strip() == "":
+            continue
+        entry_id = int(raw_id)
+        if entry_id in seen:
+            continue
+        seen.add(entry_id)
+        name = str(item.get("name") or "").strip() or f"#{entry_id}"
+        out.append({"id": entry_id, "name": name})
+    return out
+
+
 def empty_paperless_settings() -> dict[str, Any]:
     return {
         "field_map": {},  # role → paperless field id
-        "tag": settings.paperless_tag,
+        "tag": settings.paperless_tag,  # legacy name-only filter (fallback)
+        "sync_tags": [],  # [{id, name}, ...] — OR within, AND with types
+        "sync_document_types": [],  # [{id, name}, ...]
         "ghostfolio_default_account_id": settings.ghostfolio_default_account_id,
         "ghostfolio_data_source": settings.ghostfolio_data_source,
         # Browser-reachable Paperless UI base (npm/local); API URL often stays Docker-internal.
@@ -113,6 +138,14 @@ def get_paperless_settings(session: Session) -> dict[str, Any]:
     }
     tag = merged.get("tag")
     merged["tag"] = (str(tag).strip() or None) if tag is not None else None
+    try:
+        merged["sync_tags"] = _normalize_id_name_list(merged.get("sync_tags"))
+        merged["sync_document_types"] = _normalize_id_name_list(
+            merged.get("sync_document_types")
+        )
+    except ValueError:
+        merged["sync_tags"] = []
+        merged["sync_document_types"] = []
     account = merged.get("ghostfolio_default_account_id")
     merged["ghostfolio_default_account_id"] = (
         str(account).strip() or None if account is not None else None
@@ -139,6 +172,13 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
         field_map[role_key] = int(field_id)
 
     tag = payload.get("tag", current["tag"])
+    sync_tags = _normalize_id_name_list(payload.get("sync_tags", current["sync_tags"]))
+    sync_document_types = _normalize_id_name_list(
+        payload.get("sync_document_types", current["sync_document_types"])
+    )
+    # Prefer ID-based tag filter; clear legacy name when sync_tags are set.
+    if sync_tags:
+        tag = None
     account = payload.get(
         "ghostfolio_default_account_id",
         current["ghostfolio_default_account_id"],
@@ -149,6 +189,8 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
     value = {
         "field_map": field_map,
         "tag": (str(tag).strip() or None) if tag is not None else None,
+        "sync_tags": sync_tags,
+        "sync_document_types": sync_document_types,
         "ghostfolio_default_account_id": (
             str(account).strip() or None if account is not None else None
         ),
@@ -167,6 +209,22 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
         row.value = value
     session.flush()
     return get_paperless_settings(session)
+
+
+def sync_filter_ids(cfg: dict[str, Any]) -> tuple[list[int], list[int]]:
+    """Return (tag_ids, document_type_ids) from settings."""
+    tag_ids = [int(item["id"]) for item in (cfg.get("sync_tags") or []) if item.get("id")]
+    type_ids = [
+        int(item["id"]) for item in (cfg.get("sync_document_types") or []) if item.get("id")
+    ]
+    return tag_ids, type_ids
+
+
+def has_sync_filters(cfg: dict[str, Any]) -> bool:
+    tag_ids, type_ids = sync_filter_ids(cfg)
+    if tag_ids or type_ids:
+        return True
+    return bool(cfg.get("tag"))
 
 
 def resolve_role_field_map(

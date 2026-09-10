@@ -157,6 +157,63 @@ def test_paperless_list_documents_and_fields() -> None:
     assert len(client.list_documents()) == 1
 
 
+def test_list_documents_paginates_and_filters(db_session) -> None:
+    pages = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/tags/"):
+            return httpx.Response(200, json={"results": [{"id": 9, "name": "wertpapier"}]})
+        if request.url.path.endswith("/document_types/"):
+            return httpx.Response(200, json={"results": [{"id": 3, "name": "Abrechnung"}]})
+        if request.url.path.endswith("/documents/"):
+            params = request.url.params
+            assert params.get("document_type__id") == "3"
+            assert "9" in params.get_list("tags__id")
+            pages["n"] += 1
+            if pages["n"] == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [_doc(1), _doc(2)],
+                        "next": "http://paperless.test/api/documents/?page=2",
+                    },
+                )
+            return httpx.Response(200, json={"results": [_doc(3)], "next": None})
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    partial = client.list_documents(tag_ids=[9], document_type_ids=[3], paginate=False)
+    assert len(partial) == 2
+    assert pages["n"] == 1
+
+    pages["n"] = 0
+    events: list[dict] = []
+    full = client.list_documents(
+        tag_ids=[9],
+        document_type_ids=[3],
+        paginate=True,
+        on_progress=events.append,
+    )
+    assert {d["id"] for d in full} == {1, 2, 3}
+    assert pages["n"] == 2
+    assert any(e.get("event") == "page" for e in events)
+
+    save_paperless_settings(
+        db_session,
+        {
+            "sync_tags": [{"id": 9, "name": "wertpapier"}],
+            "sync_document_types": [{"id": 3, "name": "Abrechnung"}],
+        },
+    )
+    cfg = get_paperless_settings(db_session)
+    assert cfg["sync_tags"][0]["id"] == 9
+    assert cfg["tag"] is None or cfg["sync_tags"]
+
+
 def test_sync_uses_legacy_name_fallback(db_session) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         handled = _fields_handler(request)

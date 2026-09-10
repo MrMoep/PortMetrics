@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from queue import Empty, SimpleQueue
+from threading import Thread
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -37,9 +40,12 @@ from portmetrics.paperless.mapping import (
     FIELD_ROLE_META,
     FIELD_ROLES,
     get_paperless_settings,
+    has_sync_filters,
     save_paperless_settings,
 )
 from portmetrics.paperless.staging import (
+    SYNC_MODE_FULL,
+    SYNC_MODE_PARTIAL,
     confirm_staging,
     ingest_paperless_document,
     list_staging,
@@ -307,18 +313,118 @@ def staging_list(status: str | None = None, db: Session = Depends(get_db)) -> di
     return {"count": len(items), "items": items}
 
 
-@app.post("/api/staging/sync")
-def staging_sync(db: Session = Depends(get_db)) -> dict:
+@app.post("/api/staging/sync", response_model=None)
+def staging_sync(
+    mode: str = Query(default=SYNC_MODE_PARTIAL),
+    db: Session = Depends(get_db),
+):
+    """Pull Paperless → staging.
+
+    ``mode=partial`` (default): newest ≤100 docs, JSON result.
+    ``mode=full``: all pages matching filters, NDJSON progress stream.
+    """
+    resolved = (mode or SYNC_MODE_PARTIAL).strip().lower()
+    if resolved not in {SYNC_MODE_PARTIAL, SYNC_MODE_FULL}:
+        raise HTTPException(status_code=400, detail="mode must be 'partial' or 'full'")
+
     client = _paperless_client()
-    try:
-        result = sync_paperless_documents(db, client)
-    except PaperlessError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {
-        "scanned": result.scanned,
-        "upserted": result.upserted,
-        "skipped": result.skipped,
-    }
+    cfg = get_paperless_settings(db)
+    filters_active = has_sync_filters(cfg)
+
+    if resolved == SYNC_MODE_PARTIAL:
+        try:
+            result = sync_paperless_documents(db, client, mode=SYNC_MODE_PARTIAL)
+        except (PaperlessError, ValueError) as exc:
+            raise HTTPException(
+                status_code=502 if isinstance(exc, PaperlessError) else 400,
+                detail=str(exc),
+            ) from exc
+        return {
+            "event": "done",
+            "scanned": result.scanned,
+            "upserted": result.upserted,
+            "skipped": result.skipped,
+            "mode": result.mode,
+            "filters_active": result.filters_active,
+        }
+
+    # Full sync: stream progress so the UI can show work is ongoing.
+    queue: SimpleQueue[dict | None] = SimpleQueue()
+    SessionLocal = get_session_factory()
+    paperless_url = settings.paperless_url
+    paperless_token = settings.paperless_token
+
+    def worker() -> None:
+        session = SessionLocal()
+        local_client = PaperlessClient(paperless_url or "", paperless_token or "", timeout=120.0)
+        try:
+            def on_progress(event: dict) -> None:
+                queue.put(event)
+
+            try:
+                result = sync_paperless_documents(
+                    session,
+                    local_client,
+                    mode=SYNC_MODE_FULL,
+                    on_progress=on_progress,
+                )
+                session.commit()
+                queue.put(
+                    {
+                        "event": "done",
+                        "scanned": result.scanned,
+                        "upserted": result.upserted,
+                        "skipped": result.skipped,
+                        "mode": result.mode,
+                        "filters_active": result.filters_active,
+                        "warning": (
+                            None
+                            if filters_active
+                            else "Full sync without tag/document-type filter"
+                        ),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - stream error to client
+                session.rollback()
+                queue.put({"event": "error", "detail": str(exc)})
+        finally:
+            session.close()
+            queue.put(None)
+
+    Thread(target=worker, daemon=True).start()
+
+    def generate() -> Generator[str, None, None]:
+        yield json.dumps(
+            {
+                "event": "start",
+                "mode": SYNC_MODE_FULL,
+                "filters_active": filters_active,
+                "warning": (
+                    None
+                    if filters_active
+                    else "Full sync without filters — large archives may take minutes"
+                ),
+            }
+        ) + "\n"
+        while True:
+            try:
+                item = queue.get(timeout=300)
+            except Empty:
+                yield json.dumps({"event": "error", "detail": "Sync timed out"}) + "\n"
+                break
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={
+            # Discourage intermediary buffering so progress arrives promptly.
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 def _paperless_document_base_url(cfg: dict) -> str | None:
@@ -336,6 +442,8 @@ def _paperless_settings_payload(cfg: dict) -> dict:
         "role_meta": list(FIELD_ROLE_META),
         "field_map": cfg["field_map"],
         "tag": cfg["tag"],
+        "sync_tags": cfg.get("sync_tags") or [],
+        "sync_document_types": cfg.get("sync_document_types") or [],
         "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
         "ghostfolio_data_source": cfg["ghostfolio_data_source"],
         "public_url": cfg.get("public_url"),
@@ -349,6 +457,12 @@ def _paperless_settings_payload(cfg: dict) -> dict:
             "currency": "Währung aus Monetary-Feldern Kurs/Entgelte (z.B. EUR152.34).",
             "symbol": "Ghostfolio-Symbol = ISIN (kein separates Symbol-Feld).",
             "public_url": "Browser-URL für Doc-Links; Fallback PAPERLESS_URL (Env).",
+            "sync_filters": (
+                "Teilsync: neueste ≤100 Docs. Full Sync: alle Seiten. "
+                "Filter: mehrere Tags = ODER, mehrere Dokumententypen = ODER; "
+                "Tags und Typen zusammen = UND. Webhook nutzt den Filter nicht, "
+                "prüft aber weiterhin Pflichtfelder."
+            ),
         },
     }
 
@@ -401,16 +515,50 @@ def settings_paperless_custom_fields() -> dict:
     }
 
 
+def _id_name_list(items: list[dict]) -> list[dict]:
+    return [
+        {"id": int(item["id"]), "name": item.get("name") or f"#{item['id']}"}
+        for item in items
+        if item.get("id") is not None
+    ]
+
+
+@app.get("/api/settings/paperless/tags")
+def settings_paperless_tags() -> dict:
+    client = _paperless_client()
+    try:
+        tags = client.list_tags()
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = _id_name_list(tags)
+    return {"count": len(rows), "tags": rows}
+
+
+@app.get("/api/settings/paperless/document-types")
+def settings_paperless_document_types() -> dict:
+    client = _paperless_client()
+    try:
+        types = client.list_document_types()
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = _id_name_list(types)
+    return {"count": len(rows), "document_types": rows}
+
+
 @app.post("/api/settings/paperless/test")
 def settings_paperless_test() -> dict:
     client = _paperless_client()
     try:
         fields = client.list_custom_fields()
+        tags = client.list_tags()
+        doc_types = client.list_document_types()
     except PaperlessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "ok": True,
         "custom_field_count": len(fields),
+        "tag_count": len(tags),
+        "document_type_count": len(doc_types),
         "url": settings.paperless_url,
     }
 
@@ -466,6 +614,11 @@ async def webhook_paperless(
         "action": result.action,
         "reason": result.reason,
         "staging_id": result.staging_id,
+        "hint": (
+            "Dokument übersprungen — Pflichtfelder prüfen (ISIN/Typ/Kurs) oder Mapping."
+            if result.action == "skipped"
+            else None
+        ),
     }
 
 

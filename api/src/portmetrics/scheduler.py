@@ -74,9 +74,10 @@ def job_sync_paperless() -> None:
     client = PaperlessClient(settings.paperless_url, settings.paperless_token)
     try:
         with session_scope(engine) as session:
-            result = sync_paperless_documents(session, client)
+            result = sync_paperless_documents(session, client, mode="partial")
         logger.info(
-            "scheduled paperless sync ok: scanned=%s upserted=%s skipped=%s",
+            "scheduled paperless sync ok: mode=%s scanned=%s upserted=%s skipped=%s",
+            result.mode,
             result.scanned,
             result.upserted,
             result.skipped,

@@ -115,11 +115,18 @@ export type PaperlessRoleMeta = {
   hint?: string;
 };
 
+export type PaperlessIdName = {
+  id: number;
+  name: string;
+};
+
 export type PaperlessSettings = {
   roles: string[];
   role_meta?: PaperlessRoleMeta[];
   field_map: Record<string, number>;
   tag: string | null;
+  sync_tags?: PaperlessIdName[];
+  sync_document_types?: PaperlessIdName[];
   ghostfolio_default_account_id: string | null;
   ghostfolio_data_source: string;
   public_url?: string | null;
@@ -138,6 +145,21 @@ export type PortfolioSettings = {
   asset_id_preference: "symbol" | "wkn" | "isin";
 };
 
+export type StagingSyncEvent = {
+  event: string;
+  scanned?: number;
+  upserted?: number;
+  skipped?: number;
+  mode?: string;
+  filters_active?: boolean;
+  warning?: string | null;
+  detail?: string;
+  pages_scanned?: number;
+  docs_seen?: number;
+  processed?: number;
+  total?: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -148,6 +170,62 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(text || `${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<T>;
+}
+
+async function stagingSyncStream(
+  mode: "partial" | "full",
+  onEvent?: (event: StagingSyncEvent) => void,
+): Promise<StagingSyncEvent> {
+  const response = await fetch(`/api/staging/sync?mode=${encodeURIComponent(mode)}`, {
+    method: "POST",
+    headers: { Accept: "application/x-ndjson, application/json" },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `${response.status} ${response.statusText}`);
+  }
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json") && !contentType.includes("ndjson")) {
+    const done = (await response.json()) as StagingSyncEvent;
+    onEvent?.(done);
+    return done;
+  }
+  if (!response.body) {
+    throw new Error("Empty sync response body");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let last: StagingSyncEvent | null = null;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const event = JSON.parse(trimmed) as StagingSyncEvent;
+      last = event;
+      onEvent?.(event);
+      if (event.event === "error") {
+        throw new Error(event.detail || "Paperless sync failed");
+      }
+    }
+  }
+  if (buffer.trim()) {
+    const event = JSON.parse(buffer.trim()) as StagingSyncEvent;
+    last = event;
+    onEvent?.(event);
+    if (event.event === "error") {
+      throw new Error(event.detail || "Paperless sync failed");
+    }
+  }
+  if (!last || last.event !== "done") {
+    throw new Error("Paperless sync ended without result");
+  }
+  return last;
 }
 
 export const api = {
@@ -162,7 +240,10 @@ export const api = {
     request<{ items: StagingItem[] }>(
       status ? `/api/staging?status=${encodeURIComponent(status)}` : "/api/staging",
     ),
-  stagingSync: () => request<Record<string, unknown>>("/api/staging/sync", { method: "POST" }),
+  stagingSync: (
+    mode: "partial" | "full" = "partial",
+    onEvent?: (event: StagingSyncEvent) => void,
+  ) => stagingSyncStream(mode, onEvent),
   stagingConfirm: (id: number) =>
     request<StagingItem>(`/api/staging/${id}/confirm`, { method: "POST" }),
   stagingReject: (id: number) =>
@@ -171,6 +252,8 @@ export const api = {
   savePaperlessSettings: (body: {
     field_map: Record<string, number | null>;
     tag?: string | null;
+    sync_tags?: PaperlessIdName[];
+    sync_document_types?: PaperlessIdName[];
     ghostfolio_default_account_id?: string | null;
     ghostfolio_data_source?: string;
     public_url?: string | null;
@@ -192,11 +275,17 @@ export const api = {
     }),
   paperlessCustomFields: () =>
     request<{ fields: PaperlessField[] }>("/api/settings/paperless/custom-fields"),
+  paperlessTags: () => request<{ tags: PaperlessIdName[] }>("/api/settings/paperless/tags"),
+  paperlessDocumentTypes: () =>
+    request<{ document_types: PaperlessIdName[] }>("/api/settings/paperless/document-types"),
   testPaperless: () =>
-    request<{ ok: boolean; custom_field_count: number; url: string | null }>(
-      "/api/settings/paperless/test",
-      { method: "POST" },
-    ),
+    request<{
+      ok: boolean;
+      custom_field_count: number;
+      tag_count?: number;
+      document_type_count?: number;
+      url: string | null;
+    }>("/api/settings/paperless/test", { method: "POST" }),
   simulateSell: (body: {
     isin: string;
     quantity: string;

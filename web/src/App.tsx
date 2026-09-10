@@ -4,6 +4,7 @@ import {
   Lot,
   Overview,
   PaperlessField,
+  PaperlessIdName,
   PaperlessSettings,
   PortfolioSettings,
   StagingItem,
@@ -292,10 +293,10 @@ const OPS_ACTIONS: {
   },
   {
     id: "paperless",
-    label: "Sync Paperless",
-    hint: "Belege pullen und Staging-Queue aktualisieren.",
+    label: "Teilsync Paperless",
+    hint: "Neueste ≤100 Belege pullen (Catch-up; Filter optional).",
     icon: "paperless",
-    run: () => api.stagingSync(),
+    run: () => api.stagingSync("partial"),
   },
 ];
 
@@ -311,8 +312,11 @@ export default function App() {
   const [paperlessSettings, setPaperlessSettings] = useState<PaperlessSettings | null>(null);
   const [portfolioSettings, setPortfolioSettings] = useState<PortfolioSettings | null>(null);
   const [customFields, setCustomFields] = useState<PaperlessField[]>([]);
+  const [paperlessTags, setPaperlessTags] = useState<PaperlessIdName[]>([]);
+  const [paperlessDocTypes, setPaperlessDocTypes] = useState<PaperlessIdName[]>([]);
   const [fieldMapDraft, setFieldMapDraft] = useState<Record<string, string>>({});
-  const [tagDraft, setTagDraft] = useState("");
+  const [syncTagsDraft, setSyncTagsDraft] = useState<PaperlessIdName[]>([]);
+  const [syncDocTypesDraft, setSyncDocTypesDraft] = useState<PaperlessIdName[]>([]);
   const [accountDraft, setAccountDraft] = useState("");
   const [dataSourceDraft, setDataSourceDraft] = useState("YAHOO");
   const [publicUrlDraft, setPublicUrlDraft] = useState("");
@@ -368,7 +372,8 @@ export default function App() {
         draft[role] = cfg.field_map[role] != null ? String(cfg.field_map[role]) : "";
       }
       setFieldMapDraft(draft);
-      setTagDraft(cfg.tag ?? "");
+      setSyncTagsDraft(cfg.sync_tags ?? []);
+      setSyncDocTypesDraft(cfg.sync_document_types ?? []);
       setAccountDraft(cfg.ghostfolio_default_account_id ?? "");
       setDataSourceDraft(cfg.ghostfolio_data_source || "YAHOO");
       setPublicUrlDraft(cfg.public_url ?? "");
@@ -378,13 +383,23 @@ export default function App() {
       setAssetIdPrefDraft(portfolio.asset_id_preference || "symbol");
       if (cfg.paperless_configured) {
         try {
-          const fields = await api.paperlessCustomFields();
+          const [fields, tags, types] = await Promise.all([
+            api.paperlessCustomFields(),
+            api.paperlessTags(),
+            api.paperlessDocumentTypes(),
+          ]);
           setCustomFields(fields.fields);
+          setPaperlessTags(tags.tags);
+          setPaperlessDocTypes(types.document_types);
         } catch {
           setCustomFields([]);
+          setPaperlessTags([]);
+          setPaperlessDocTypes([]);
         }
       } else {
         setCustomFields([]);
+        setPaperlessTags([]);
+        setPaperlessDocTypes([]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -444,7 +459,8 @@ export default function App() {
       const [saved, portfolio] = await Promise.all([
         api.savePaperlessSettings({
           field_map,
-          tag: tagDraft.trim() || null,
+          sync_tags: syncTagsDraft,
+          sync_document_types: syncDocTypesDraft,
           ghostfolio_default_account_id: accountDraft.trim() || null,
           ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
           public_url: publicUrlDraft.trim() || null,
@@ -458,6 +474,8 @@ export default function App() {
       ]);
       setPaperlessSettings(saved);
       setPortfolioSettings(portfolio);
+      setSyncTagsDraft(saved.sync_tags ?? []);
+      setSyncDocTypesDraft(saved.sync_document_types ?? []);
       setStatus("Einstellungen gespeichert");
       await refresh();
     } catch (err) {
@@ -471,9 +489,68 @@ export default function App() {
     setStatus("Paperless testen…");
     try {
       const result = await api.testPaperless();
-      const fields = await api.paperlessCustomFields();
+      const [fields, tags, types] = await Promise.all([
+        api.paperlessCustomFields(),
+        api.paperlessTags(),
+        api.paperlessDocumentTypes(),
+      ]);
       setCustomFields(fields.fields);
-      setStatus(`Paperless OK (${result.custom_field_count} Custom Fields)`);
+      setPaperlessTags(tags.tags);
+      setPaperlessDocTypes(types.document_types);
+      setStatus(
+        `Paperless OK (${result.custom_field_count} Fields, ${result.tag_count ?? tags.tags.length} Tags, ${result.document_type_count ?? types.document_types.length} Typen)`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
+  function toggleIdName(
+    list: PaperlessIdName[],
+    item: PaperlessIdName,
+    setter: (next: PaperlessIdName[]) => void,
+  ) {
+    if (list.some((row) => row.id === item.id)) {
+      setter(list.filter((row) => row.id !== item.id));
+    } else {
+      setter([...list, { id: item.id, name: item.name }]);
+    }
+  }
+
+  async function runPaperlessSync(mode: "partial" | "full") {
+    const hasFilters =
+      syncTagsDraft.length > 0 ||
+      syncDocTypesDraft.length > 0 ||
+      (paperlessSettings?.sync_tags?.length ?? 0) > 0 ||
+      (paperlessSettings?.sync_document_types?.length ?? 0) > 0 ||
+      Boolean(paperlessSettings?.tag);
+    if (mode === "full" && !hasFilters) {
+      const ok = window.confirm(
+        "Full Sync ohne Tag-/Dokumententyp-Filter. Bei großen Archiven (1000+ Docs) kann das mehrere Minuten dauern. Fortfahren?",
+      );
+      if (!ok) return;
+    }
+    setError("");
+    setStatus(mode === "full" ? "Full Sync Paperless…" : "Teilsync Paperless…");
+    try {
+      const done = await api.stagingSync(mode, (event) => {
+        if (event.event === "start" && event.warning) {
+          setStatus(event.warning);
+        } else if (event.event === "page") {
+          setStatus(
+            `Full Sync… Seite ${event.pages_scanned ?? "?"} · ${event.docs_seen ?? 0} Docs`,
+          );
+        } else if (event.event === "ingest") {
+          setStatus(
+            `Importiere Staging… ${event.processed ?? 0}/${event.total ?? "?"} (neu ${event.upserted ?? 0}, skip ${event.skipped ?? 0})`,
+          );
+        }
+      });
+      await refresh();
+      setStatus(
+        `${mode === "full" ? "Full Sync" : "Teilsync"} OK · scanned ${done.scanned ?? 0}, upserted ${done.upserted ?? 0}, skipped ${done.skipped ?? 0}`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("");
@@ -904,6 +981,14 @@ export default function App() {
               ausführen. Erledigte Einträge (confirm/reject) erscheinen nicht mehr — auch nicht bei
               erneutem Webhook. Typ OTHER ist sichtbar, aber nicht importierbar.
             </p>
+            <div className="settings-actions" style={{ marginBottom: "0.75rem" }}>
+              <button type="button" onClick={() => void runPaperlessSync("partial")}>
+                Teilsync (≤100)
+              </button>
+              <button type="button" onClick={() => void runPaperlessSync("full")}>
+                Full Sync
+              </button>
+            </div>
           <div className="table-wrap">
             <table>
               <thead>
@@ -1195,14 +1280,67 @@ export default function App() {
                   .
                 </span>
               </label>
-              <label>
-                Paperless-Tag (optional)
-                <input
-                  value={tagDraft}
-                  onChange={(e) => setTagDraft(e.target.value)}
-                  placeholder="wertpapier"
-                />
-              </label>
+              <fieldset className="filter-fieldset">
+                <legend>Sync-Filter (Tags / Dokumententypen)</legend>
+                <p className="muted">
+                  Mehrere Tags = ODER, mehrere Dokumententypen = ODER; Tags und Typen zusammen =
+                  UND. Speicherung als ID (+ Name zur Anzeige). Teilsync: neueste ≤100 (auch ohne
+                  Filter). Full Sync: alle Seiten — ohne Filter erscheint eine Warnung. Webhook
+                  nutzt diesen Filter nicht, prüft aber weiterhin Pflichtfelder.
+                </p>
+                {paperlessSettings?.tag ? (
+                  <p className="muted">
+                    Legacy-Tag aus Env/Altbestand: <span className="mono">{paperlessSettings.tag}</span>{" "}
+                    (wird beim Speichern der ID-Filter abgelöst).
+                  </p>
+                ) : null}
+                <div className="filter-grid">
+                  <div>
+                    <strong className="mono">Tags</strong>
+                    <div className="check-list">
+                      {paperlessTags.length === 0 && (
+                        <p className="muted">Keine Tags geladen — Verbindung testen.</p>
+                      )}
+                      {paperlessTags.map((tag) => (
+                        <label key={tag.id} className="check-row">
+                          <input
+                            type="checkbox"
+                            checked={syncTagsDraft.some((row) => row.id === tag.id)}
+                            onChange={() =>
+                              toggleIdName(syncTagsDraft, tag, setSyncTagsDraft)
+                            }
+                          />
+                          <span>
+                            {tag.name} <span className="muted mono">#{tag.id}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <strong className="mono">Dokumententypen</strong>
+                    <div className="check-list">
+                      {paperlessDocTypes.length === 0 && (
+                        <p className="muted">Keine Typen geladen — Verbindung testen.</p>
+                      )}
+                      {paperlessDocTypes.map((docType) => (
+                        <label key={docType.id} className="check-row">
+                          <input
+                            type="checkbox"
+                            checked={syncDocTypesDraft.some((row) => row.id === docType.id)}
+                            onChange={() =>
+                              toggleIdName(syncDocTypesDraft, docType, setSyncDocTypesDraft)
+                            }
+                          />
+                          <span>
+                            {docType.name} <span className="muted mono">#{docType.id}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </fieldset>
               <label>
                 Ghostfolio Default Account-ID
                 <input

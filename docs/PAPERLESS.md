@@ -2,7 +2,7 @@
 
 
 
-Paperless NGX ist **Belegarchiv + Staging**, nicht das Ledger. Extrahierte Felder landen in `staging_imports`, werden geprüft und erst dann nach Ghostfolio importiert.
+Paperless NGX ist **Belegarchiv + Staging**, nicht das Ledger. Extrahierte Felder landen in `staging_imports`, werden gepr?ft und erst dann nach Ghostfolio importiert.
 
 
 
@@ -24,19 +24,19 @@ Felder werden **in Paperless** angelegt (beliebige Namen). In PortMetrics unter 
 
 | `type` | ja | `BUY`, `SELL`, `DIVIDEND`, `FEE`, `INTEREST`, `OTHER` |
 
-| `isin` | ja | ISIN — zugleich Ghostfolio-Symbol |
+| `isin` | ja | ISIN ? zugleich Ghostfolio-Symbol |
 
-| `wkn` | nein | WKN — wird bei ISIN+WKN in `asset_identifiers` persistiert |
+| `wkn` | nein | WKN ? wird bei ISIN+WKN in `asset_identifiers` persistiert |
 
-| `quantity` | ja* | Stückzahl / Nennwert |
+| `quantity` | ja* | St?ckzahl / Nennwert |
 
-| `unit_price` | ja | Stückkurs (Monetary, z. B. `EUR152.34`) |
+| `unit_price` | ja | St?ckkurs (Monetary, z.?B. `EUR152.34`) |
 
-| `fee` | nein | Entgelte bzw. Steuerabzüge (Default 0) |
+| `fee` | nein | Entgelte bzw. Steuerabz?ge (Default 0) |
 
 
 
-\* Bei `FEE` / `INTEREST` / `OTHER` ohne Stückzahl setzt PortMetrics intern `quantity=1`.
+\* Bei `FEE` / `INTEREST` / `OTHER` ohne St?ckzahl setzt PortMetrics intern `quantity=1`.
 
 
 
@@ -50,9 +50,9 @@ Felder werden **in Paperless** angelegt (beliebige Namen). In PortMetrics unter 
 
 | Handelsdatum | Paperless-**Dokumentdatum** (`created`) |
 
-| Währung | aus Monetary-Wert von Kurs/Entgelte |
+| W?hrung | aus Monetary-Wert von Kurs/Entgelte |
 
-| Symbol / Ticker | entfällt — Symbol = ISIN |
+| Symbol / Ticker | entf?llt ? Symbol = ISIN |
 
 | Import-Status / Activity-ID | lokal in Staging / `document_links` (kein Paperless-Write-back) |
 
@@ -62,11 +62,15 @@ Felder werden **in Paperless** angelegt (beliebige Namen). In PortMetrics unter 
 
 
 
-Ohne gespeichertes Mapping fällt PortMetrics auf Legacy-Namen zurück (`wp_typ`, `isin`, `wkn`, `stueckzahl`, `kurs`, `gebuehr`).
+Ohne gespeichertes Mapping f?llt PortMetrics auf Legacy-Namen zur?ck (`wp_typ`, `isin`, `wkn`, `stueckzahl`, `kurs`, `gebuehr`).
 
 
 
-Optional: Tag in den Einstellungen (oder Env `PAPERLESS_TAG`) — nur Dokumente mit diesem Tag.
+Optional: Sync-Filter in den Einstellungen ? Tags und/oder Dokumententypen (ID + Name). Legacy: Env `PAPERLESS_TAG` als Fallback, bis ID-Filter gesetzt sind.
+
+**Filterlogik:** mehrere Tags = ODER, mehrere Dokumententypen = ODER; Tags und Typen zusammen = UND.
+
+**Teilsync** (Scheduler + UI): neueste ?100 Docs, Filter optional. **Full Sync** (UI): alle Seiten; ohne Filter Warnung. Webhook filtert nicht nach Tag/Typ, pr?ft aber Pflichtfelder.
 
 
 
@@ -76,17 +80,17 @@ Optional: Tag in den Einstellungen (oder Env `PAPERLESS_TAG`) — nur Dokumente 
 
 ```
 
-PDF → P-GPT / Felder
+PDF ? P-GPT / Felder
 
-  → Webhook (document updated) oder Sync/Scheduler
+  ? Webhook (document updated) oder Sync/Scheduler
 
-  → staging_imports
+  ? staging_imports
 
-  → Review (Confirm/Reject) im Dashboard
+  ? Review (Confirm/Reject) im Dashboard
 
-  → Ghostfolio Import → document_links
+  ? Ghostfolio Import ? document_links
 
-  → Sync Ghostfolio → FIFO
+  ? Sync Ghostfolio ? FIFO
 
 ```
 
@@ -100,21 +104,21 @@ PDF → P-GPT / Felder
 
 2. In Paperless einen Workflow anlegen:
 
-   - Trigger: **Document updated** (nicht nur added — Custom Fields oft erst später)
+   - Trigger: **Document updated** (nicht nur added ? Custom Fields oft erst sp?ter)
 
-   - Filter: optional Tag (z. B. `wertpapier`)
+   - Filter: optional Tag (z.?B. `wertpapier`)
 
    - Action: Webhook `POST` auf `https://<portmetrics>/api/webhooks/paperless`
 
    - Header: `X-PortMetrics-Secret: <secret>` (oder Query `?secret=`)
 
-   - Body JSON z. B. `{ "doc_url": "{doc_url}" }` oder `{ "document_id": "<id>" }`
+   - Body JSON z.?B. `{ "doc_url": "{doc_url}" }` oder `{ "document_id": "<id>" }`
 
 3. Confirm/Reject weiterhin nur im Staging-Tab.
 
 
 
-Unvollständige Felder werden übersprungen (`action=skipped`); manueller Sync bleibt als Fallback.
+Unvollst?ndige Felder werden ?bersprungen (`action=skipped`); manueller Sync bleibt als Fallback.
 
 
 
@@ -122,7 +126,7 @@ Unvollständige Felder werden übersprungen (`action=skipped`); manueller Sync b
 
 
 
-`PAPERLESS_SYNC_INTERVAL_MINUTES>0` aktiviert einen periodischen Full-Pull (Hybrid zu Webhook). `0` = aus.
+`PAPERLESS_SYNC_INTERVAL_MINUTES>0` aktiviert einen periodischen **Teilsync** (Hybrid zu Webhook). `0` = aus.
 
 
 
@@ -140,19 +144,25 @@ Unvollständige Felder werden übersprungen (`action=skipped`); manueller Sync b
 
 | `GET` | `/api/staging?status=all` | Alle inkl. imported/rejected |
 
-| `POST` | `/api/staging/sync` | Paperless → Staging (manuell) |
+| `POST` | `/api/staging/sync?mode=partial` | Teilsync <=100 (JSON) |
+
+| `POST` | `/api/staging/sync?mode=full` | Full Sync, NDJSON-Progress |
 
 | `POST` | `/api/webhooks/paperless` | Auto-Ingest eines Docs |
 
-| `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio (`OTHER` → 400) |
+| `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio (`OTHER` -> 400) |
 
 | `POST` | `/api/staging/{id}/reject` | Ablehnen |
 
-| `GET` | `/api/settings/paperless` | Mapping + `role_meta` + Tag + GF-Defaults |
+| `GET` | `/api/settings/paperless` | Mapping + Filter + GF-Defaults |
 
-| `PUT` | `/api/settings/paperless` | Mapping speichern |
+| `PUT` | `/api/settings/paperless` | Mapping / sync_tags / sync_document_types |
 
 | `GET` | `/api/settings/paperless/custom-fields` | Felder aus Paperless |
+
+| `GET` | `/api/settings/paperless/tags` | Tags (id, name) |
+
+| `GET` | `/api/settings/paperless/document-types` | Dokumententypen (id, name) |
 
 | `POST` | `/api/settings/paperless/test` | Verbindungstest |
 
@@ -182,6 +192,6 @@ GHOSTFOLIO_DATA_SOURCE=YAHOO
 
 
 
-`PAPERLESS_URL` / `PAPERLESS_TOKEN` / `PAPERLESS_WEBHOOK_SECRET` bleiben Env. Tag, Field-Map, öffentliche Web-URL (`public_url` für Doc-Links; Fallback `PAPERLESS_URL`) und Ghostfolio-Defaults können in der UI überschrieben und in `app_settings` persistiert werden. Dokumente mit ISIN+WKN füllen `asset_identifiers` (Anzeige in FIFO Lots / Positionen).
+`PAPERLESS_URL` / `PAPERLESS_TOKEN` / `PAPERLESS_WEBHOOK_SECRET` bleiben Env. Tag, Field-Map, ?ffentliche Web-URL (`public_url` f?r Doc-Links; Fallback `PAPERLESS_URL`) und Ghostfolio-Defaults k?nnen in der UI ?berschrieben und in `app_settings` persistiert werden. Dokumente mit ISIN+WKN f?llen `asset_identifiers` (Anzeige in FIFO Lots / Positionen).
 
 
