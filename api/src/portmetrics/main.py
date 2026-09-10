@@ -34,6 +34,7 @@ from portmetrics.metrics.periods import (
 )
 from portmetrics.paperless.client import PaperlessClient, PaperlessError
 from portmetrics.paperless.mapping import (
+    FIELD_ROLE_META,
     FIELD_ROLES,
     get_paperless_settings,
     save_paperless_settings,
@@ -323,6 +324,7 @@ def staging_sync(db: Session = Depends(get_db)) -> dict:
 def _paperless_settings_payload(cfg: dict) -> dict:
     return {
         "roles": list(FIELD_ROLES),
+        "role_meta": list(FIELD_ROLE_META),
         "field_map": cfg["field_map"],
         "tag": cfg["tag"],
         "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
@@ -331,6 +333,11 @@ def _paperless_settings_payload(cfg: dict) -> dict:
         "webhook_secret_configured": bool(settings.paperless_webhook_secret),
         "webhook_path": "/api/webhooks/paperless",
         "paperless_sync_interval_minutes": settings.paperless_sync_interval_minutes,
+        "notes": {
+            "trade_date": "Handelsdatum = Paperless-Dokumentdatum (created), kein Custom Field.",
+            "currency": "Währung aus Monetary-Feldern Kurs/Entgelte (z.B. EUR152.34).",
+            "symbol": "Ghostfolio-Symbol = ISIN (kein separates Symbol-Feld).",
+        },
     }
 
 
@@ -460,6 +467,8 @@ def staging_confirm(staging_id: int, db: Session = Depends(get_db)) -> dict:
         return confirm_staging(db, staging_id, ghostfolio, paperless)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GhostfolioError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

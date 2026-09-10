@@ -10,14 +10,10 @@ import httpx
 CUSTOM_FIELD_NAMES = (
     "wp_typ",
     "isin",
-    "symbol",
+    "wkn",
     "stueckzahl",
     "kurs",
     "gebuehr",
-    "handelsdatum",
-    "waehrung",
-    "gf_import_status",
-    "gf_activity_id",
 )
 
 
