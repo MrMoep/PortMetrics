@@ -224,6 +224,65 @@ def test_portfolio_settings_api_roundtrip(api_db) -> None:
     assert bad.status_code == 400
 
 
+def test_staging_confirm_runs_silent_mirror(api_db, monkeypatch) -> None:
+    """Confirm imports to GF, then best-effort mirrors so Lots refresh without manual Sync."""
+    from unittest.mock import MagicMock
+
+    import portmetrics.main as main_module
+    from portmetrics.config import Settings
+    from portmetrics.ghostfolio.client import GhostfolioError
+
+    client, _SessionLocal = api_db
+    mirror_calls: list[int] = []
+    relink_calls: list[int] = []
+
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(
+            ghostfolio_url="http://ghostfolio.test",
+            ghostfolio_access_token="tok",
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_ghostfolio_client",
+        lambda: MagicMock(),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "confirm_staging",
+        lambda *_a, **_k: {"id": 1, "status": "imported"},
+    )
+
+    def fake_mirror(_db, _client):
+        mirror_calls.append(1)
+        return MagicMock()
+
+    def fake_relink(_db, staging_id: int):
+        relink_calls.append(staging_id)
+        return True
+
+    monkeypatch.setattr(main_module, "sync_ghostfolio_mirror", fake_mirror)
+    monkeypatch.setattr(main_module, "relink_staging_document", fake_relink)
+
+    ok = client.post("/api/staging/1/confirm")
+    assert ok.status_code == 200
+    assert ok.json()["status"] == "imported"
+    assert mirror_calls == [1]
+    assert relink_calls == [1]
+
+    def boom_mirror(_db, _client):
+        mirror_calls.append(2)
+        raise GhostfolioError("gf down")
+
+    monkeypatch.setattr(main_module, "sync_ghostfolio_mirror", boom_mirror)
+    still_ok = client.post("/api/staging/1/confirm")
+    assert still_ok.status_code == 200
+    assert still_ok.json()["status"] == "imported"
+    assert mirror_calls == [1, 2]
+
+
 def test_paperless_settings_api_roundtrip(api_db) -> None:
     client, _SessionLocal = api_db
 

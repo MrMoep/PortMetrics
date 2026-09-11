@@ -90,7 +90,7 @@ PDF ? P-GPT / Felder
 
   ? Ghostfolio Import ? document_links
 
-  ? Sync Ghostfolio ? FIFO
+  ? automatischer Mirror (Activities/Preise/FIFO/Metrics; best-effort)
 
 ```
 
@@ -152,7 +152,7 @@ Unvollst?ndige Felder werden ?bersprungen (`action=skipped`); manueller Sync ble
 
 | `POST` | `/api/webhooks/paperless` | Auto-Ingest eines Docs |
 
-| `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio (`OTHER` -> 400) |
+| `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio + stiller Mirror (`OTHER` -> 400) |
 
 | `POST` | `/api/staging/{id}/reject` | Ablehnen |
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Generator
 from contextlib import asynccontextmanager
 from datetime import date
@@ -58,16 +59,16 @@ from portmetrics.paperless.staging import (
     list_staging,
     parse_paperless_document_id,
     reject_staging,
+    relink_staging_document,
     sync_paperless_documents,
 )
 from portmetrics.scheduler import start_scheduler, stop_scheduler
 from portmetrics.settings.portfolio import get_portfolio_settings, save_portfolio_settings
-from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
-from portmetrics.sync.prices import (
-    GHOSTFOLIO_PRICES_SOURCE,
-    price_snapshot_count,
-    sync_ghostfolio_prices,
-)
+from portmetrics.sync.activities import GHOSTFOLIO_SOURCE
+from portmetrics.sync.mirror import sync_ghostfolio_mirror
+from portmetrics.sync.prices import GHOSTFOLIO_PRICES_SOURCE, price_snapshot_count
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -170,19 +171,14 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
         )
     client = GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)
     try:
-        result = sync_ghostfolio_activities(db, client)
-        prices = sync_ghostfolio_prices(
-            db,
-            client,
-            history_days=settings.ghostfolio_price_history_days,
-            default_data_source=settings.ghostfolio_data_source,
-        )
-        fifo = rebuild_lots(db)
-        metrics_days = rebuild_metrics_daily(db)
+        mirror = sync_ghostfolio_mirror(db, client)
     except GhostfolioError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except FifoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    result = mirror.activities
+    prices = mirror.prices
+    fifo = mirror.fifo
     return {
         "fetched": result.fetched,
         "upserted": result.upserted,
@@ -194,7 +190,7 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
         "price_skipped": prices.skipped,
         "lots_created": fifo.lots_created,
         "consumptions": fifo.consumptions,
-        "metrics_days": metrics_days,
+        "metrics_days": mirror.metrics_days,
     }
 
 
@@ -677,13 +673,23 @@ def staging_confirm(staging_id: int, db: Session = Depends(get_db)) -> dict:
     if settings.paperless_url and settings.paperless_token:
         paperless = PaperlessClient(settings.paperless_url, settings.paperless_token)
     try:
-        return confirm_staging(db, staging_id, ghostfolio, paperless)
+        result = confirm_staging(db, staging_id, ghostfolio, paperless)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GhostfolioError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Silent best-effort mirror so Lots/Overview update without a manual Sync click.
+    try:
+        sync_ghostfolio_mirror(db, ghostfolio)
+        relink_staging_document(db, staging_id)
+    except (GhostfolioError, FifoError) as exc:
+        logger.warning("post-confirm Ghostfolio mirror failed: %s", exc)
+    except Exception:
+        logger.exception("post-confirm Ghostfolio mirror failed unexpectedly")
+    return result
 
 
 @app.post("/api/staging/{staging_id}/reject")

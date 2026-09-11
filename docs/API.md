@@ -19,7 +19,7 @@ Basis-URL im Container: `http://host:8080`
 | `GET` | `/api/positions` | Einfache Positionsrendite |
 | `GET` | `/api/staging` | Paperless-Review-Queue |
 | `POST` | `/api/staging/sync` | Paperless → Staging |
-| `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio |
+| `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio + stiller Mirror (best-effort) |
 | `POST` | `/api/staging/{id}/reject` | Staging ablehnen |
 | `POST` | `/api/webhooks/paperless` | Paperless Auto-Ingest (Shared Secret) |
 | `GET`/`PUT` | `/api/settings/assets` | Kennungs-Tabelle ISIN/WKN/preferred_symbol/display_name |

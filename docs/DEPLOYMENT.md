@@ -69,7 +69,7 @@ Field-Mapping und Ghostfolio-Defaults: nach Start unter **Einstellungen** (nicht
 
 1. Container starten, `/health` prüfen (`version`: Release `0.2.0`, Dev-Image z. B. `0.2.0-dev · 2026-09-09 23:18`)
 2. Dashboard öffnen (`http://host:8080/` oder die NPM-URL)
-3. **Sync Ghostfolio** → FIFO/Metrics laufen mit
+3. **Sync Ghostfolio** → FIFO/Metrics laufen mit (nach Staging-Confirm passiert der Mirror auch automatisch)
 4. Optional Paperless: Felder unter **Einstellungen** zuordnen, Webhook laut [PAPERLESS.md](PAPERLESS.md)
 
 ## Absicherung
