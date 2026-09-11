@@ -397,6 +397,8 @@ export default function App() {
   const [cashflowFilter, setCashflowFilter] = useState<"all" | "capital" | "income">("all");
   const [lotsSort, setLotsSort] = useState<SortState>({ key: "open_date", dir: "desc" });
   const [positionsSort, setPositionsSort] = useState<SortState>({ key: "invested", dir: "desc" });
+  const [linkLotId, setLinkLotId] = useState<number | null>(null);
+  const [linkDocRef, setLinkDocRef] = useState("");
   /** Presentation mode: zero displayed money/pct/qty (display-only, data still loaded). */
   const [showMode, setShowMode] = useState(false);
 
@@ -884,6 +886,35 @@ export default function App() {
     }
   }
 
+  async function onSubmitLotDocumentLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (linkLotId == null) return;
+    const lotId = linkLotId;
+    const ref = linkDocRef.trim();
+    if (!ref) {
+      setError("Paperless-Doc-ID oder URL angeben");
+      return;
+    }
+    setError("");
+    setStatus(`Beleg für Lot #${lotId} verknüpfen…`);
+    try {
+      const asId = Number(ref);
+      await api.linkLotDocument(
+        lotId,
+        Number.isFinite(asId) && String(asId) === ref
+          ? { paperless_doc_id: asId }
+          : { paperless_ref: ref },
+      );
+      setLinkLotId(null);
+      setLinkDocRef("");
+      await refresh();
+      setStatus(`Beleg verknüpft · Lot #${lotId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
   async function runPaperlessSync(mode: "partial" | "full") {
     if (mode === "full") {
       try {
@@ -1360,7 +1391,19 @@ export default function App() {
                           ) : null}
                         </div>
                       ) : (
-                        <span className="muted">—</span>
+                        <button
+                          type="button"
+                          className="doc-link-empty"
+                          title="Beleg manuell verknüpfen"
+                          aria-label={`Beleg für Lot ${lot.id} verknüpfen`}
+                          onClick={() => {
+                            setLinkLotId(lot.id);
+                            setLinkDocRef("");
+                            setError("");
+                          }}
+                        >
+                          —
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -2028,6 +2071,52 @@ export default function App() {
               </form>
             </Panel>
           )}
+        </div>
+      )}
+
+      {linkLotId != null && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            setLinkLotId(null);
+            setLinkDocRef("");
+          }}
+        >
+          <div
+            className="modal-panel"
+            role="dialog"
+            aria-labelledby="link-doc-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="link-doc-title">Beleg verknüpfen</h3>
+            <p className="muted">Lot #{linkLotId} — Paperless-Doc-ID oder Dokument-URL.</p>
+            <form className="form" onSubmit={(e) => void onSubmitLotDocumentLink(e)}>
+              <label>
+                Dokument
+                <input
+                  value={linkDocRef}
+                  onChange={(e) => setLinkDocRef(e.target.value)}
+                  placeholder="42 oder https://…/documents/42/"
+                  autoFocus
+                />
+              </label>
+              <div className="row-actions">
+                <button className="primary" type="submit">
+                  Verknüpfen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkLotId(null);
+                    setLinkDocRef("");
+                  }}
+                >
+                  Abbrechen
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
