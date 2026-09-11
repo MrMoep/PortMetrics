@@ -144,8 +144,10 @@ def prune_orphan_activities(
             row.gf_activity_id = None
             row.error = None
 
-    for link in linked_docs:
-        session.delete(link)
+    link_delete = DocumentLink.activity_id.in_(orphan_pks)
+    if lot_ids:
+        link_delete = link_delete | DocumentLink.lot_id.in_(lot_ids)
+    session.execute(delete(DocumentLink).where(link_delete))
 
     if lot_ids:
         session.execute(
