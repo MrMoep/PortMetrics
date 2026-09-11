@@ -182,6 +182,8 @@ def test_metrics_overview_empty(api_db) -> None:
     assert body["invested"] == "0"
     assert body["positions"] == []
     assert body["dividends"]["total"] == "0"
+    assert body["dividends"]["ytd"] == "0"
+    assert body["dividends"]["interest_ytd"] == "0"
 
 
 def test_metrics_rebuild_writes_days(api_db) -> None:

@@ -25,7 +25,13 @@ export type Overview = {
     cashflow_count: number;
     terminal_nav: string;
   };
-  cashflows?: Array<{ date: string; amount: string }>;
+  cashflows?: Array<{
+    date: string;
+    type: string;
+    asset: string;
+    asset_key?: string;
+    amount: string;
+  }>;
   risk?: {
     max_drawdown: string | null;
     peak_date: string | null;
@@ -39,13 +45,21 @@ export type Overview = {
     year: number;
     allowance: string;
     realized_ytd: string;
+    dividends_ytd?: string;
+    interest_ytd?: string;
     taxable_ytd: string;
     remaining: string;
     used_pct: string;
     warn: boolean;
     warn_pct: string;
   };
-  dividends: { total: string };
+  dividends: {
+    total: string;
+    ytd?: string;
+    interest_total?: string;
+    interest_ytd?: string;
+    year?: number;
+  };
   positions: Array<{
     isin: string;
     symbol?: string | null;

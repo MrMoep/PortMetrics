@@ -522,6 +522,38 @@ button.linkish:hover {
   color: var(--val-neg);
 }
 
+.cf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.cf-filter {
+  margin: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 transparent;
+}
+
+.cf-filter:hover {
+  color: var(--ink);
+}
+
+.cf-filter.active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  box-shadow: 2px 2px 0 var(--line);
+}
+
 /* —— Data —— */
 
 .table-wrap {

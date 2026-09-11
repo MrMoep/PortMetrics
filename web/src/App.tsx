@@ -150,13 +150,16 @@ const METRIC_HINTS: Record<string, string> = {
   invested: "Summe der Einstandswerte (offene Lots × Stückkosten).",
   unrealized: "Buchgewinn/-verlust: Marktwert minus Investiert.",
   cagr: "Jährlich annualisierte Rendite über die gesamte Haltedauer.",
-  irr: "Geldgewichtete interne Verzinsung (IRR/MWR) der Cashflows inkl. End-NAV.",
+  irr: "Geldgewichtete interne Verzinsung (IRR/MWR) inkl. Trades, Dividenden, Zinsen und End-NAV.",
   simple: "Einfache Gesamtrendite: (Endwert − Kapitaleinsatz) / Kapitaleinsatz.",
   maxdd: "Größter Kursrückgang vom Zwischenhoch zum folgenden Tief.",
   vol: "Annualisierte Schwankungsbreite der Periodenrenditen.",
   sharpe: "Überrendite je Einheit Risiko (vs. risikofreiem Zinssatz).",
-  tax: "Verbleibender steuerlicher Freibetrag im laufenden Jahr.",
-  dividends: "Summe erhaltener Dividenden über den betrachteten Zeitraum.",
+  tax: "Verbleibender steuerlicher Freibetrag im laufenden Jahr (nach realisierten Gewinnen, Dividenden und Zinsen).",
+  dividendsYtd: "Brutto-Dividenden im laufenden Kalenderjahr.",
+  interestYtd: "Brutto-Zinsen (INTEREST) im laufenden Kalenderjahr.",
+  dividends: "Summe aller erhaltenen Dividenden (gesamter Zeitraum).",
+  cashflowFilter: "Alle = Kapital + Erträge; Kapital = BUY/SELL; Erträge = DIVIDEND/INTEREST.",
   yearClose:
     "Kalenderjahr-Rendite: Jahresanfang (bzw. erster Trade) bis Jahresschluss — bei YTD bis heute.",
   yearToDate:
@@ -381,6 +384,7 @@ export default function App() {
     "symbol",
   );
   const [cashflowSort, setCashflowSort] = useState<SortState>({ key: "date", dir: "desc" });
+  const [cashflowFilter, setCashflowFilter] = useState<"all" | "capital" | "income">("all");
   const [lotsSort, setLotsSort] = useState<SortState>({ key: "open_date", dir: "desc" });
   const [positionsSort, setPositionsSort] = useState<SortState>({ key: "invested", dir: "desc" });
   /** Presentation mode: zero displayed money/pct/qty (display-only, data still loaded). */
@@ -1050,17 +1054,30 @@ export default function App() {
                   {money(overview.tax_allowance?.remaining, showMode)}
                 </strong>
               </div>
+              <div className="stat" title={METRIC_HINTS.dividendsYtd}>
+                <span>Dividenden YTD ({overview.dividends.year ?? overview.tax_allowance?.year ?? "—"})</span>
+                <strong className="mono">{money(overview.dividends.ytd ?? "0", showMode)}</strong>
+              </div>
+              <div className="stat" title={METRIC_HINTS.interestYtd}>
+                <span>Zinsen YTD</span>
+                <strong className="mono">
+                  {money(overview.dividends.interest_ytd ?? "0", showMode)}
+                </strong>
+              </div>
               <div className="stat" title={METRIC_HINTS.dividends}>
-                <span>Dividenden</span>
+                <span>Dividenden gesamt</span>
                 <strong className="mono">{money(overview.dividends.total, showMode)}</strong>
               </div>
             </div>
             {overview.tax_allowance?.warn ? (
               <p className="status error" style={{ marginTop: "0.75rem" }}>
                 Freibetrag zu {pct(overview.tax_allowance.used_pct, showMode)} ausgeschöpft (Warnschwelle{" "}
-                {pct(overview.tax_allowance.warn_pct, showMode)}) — realisiert YTD{" "}
-                {money(overview.tax_allowance.realized_ytd, showMode)} /{" "}
-                {money(overview.tax_allowance.allowance, showMode)}.
+                {pct(overview.tax_allowance.warn_pct, showMode)}) — steuerpflichtig YTD{" "}
+                {money(overview.tax_allowance.taxable_ytd, showMode)} /{" "}
+                {money(overview.tax_allowance.allowance, showMode)} (realisiert{" "}
+                {money(overview.tax_allowance.realized_ytd, showMode)}, Div{" "}
+                {money(overview.tax_allowance.dividends_ytd ?? "0", showMode)}, Zinsen{" "}
+                {money(overview.tax_allowance.interest_ytd ?? "0", showMode)}).
               </p>
             ) : null}
           </Panel>
@@ -1091,7 +1108,36 @@ export default function App() {
             </div>
           </Panel>
           {overview.cashflows && overview.cashflows.length > 0 ? (
-            <Panel label="Cashflow-Timeline" meta={`${overview.cashflows.length} FLOWS`} offset>
+            <Panel
+              label="Cashflow-Timeline"
+              meta={`${
+                overview.cashflows.filter((cf) => {
+                  if (cashflowFilter === "capital") return cf.type === "BUY" || cf.type === "SELL";
+                  if (cashflowFilter === "income")
+                    return cf.type === "DIVIDEND" || cf.type === "INTEREST";
+                  return true;
+                }).length
+              } FLOWS`}
+              offset
+            >
+              <div className="cf-filters" title={METRIC_HINTS.cashflowFilter}>
+                {(
+                  [
+                    ["all", "Alle"],
+                    ["capital", "Kapital"],
+                    ["income", "Erträge"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`cf-filter${cashflowFilter === key ? " active" : ""}`}
+                    onClick={() => setCashflowFilter(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -1099,6 +1145,18 @@ export default function App() {
                       <SortHeader
                         label="Datum"
                         column="date"
+                        sort={cashflowSort}
+                        onSort={(column) => setCashflowSort((s) => toggleSort(s, column))}
+                      />
+                      <SortHeader
+                        label="Typ"
+                        column="type"
+                        sort={cashflowSort}
+                        onSort={(column) => setCashflowSort((s) => toggleSort(s, column))}
+                      />
+                      <SortHeader
+                        label="Asset"
+                        column="asset"
                         sort={cashflowSort}
                         onSort={(column) => setCashflowSort((s) => toggleSort(s, column))}
                       />
@@ -1111,9 +1169,20 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortRows(overview.cashflows, cashflowSort).map((cf, idx) => (
-                      <tr key={`${cf.date}-${idx}`}>
+                    {sortRows(
+                      overview.cashflows.filter((cf) => {
+                        if (cashflowFilter === "capital")
+                          return cf.type === "BUY" || cf.type === "SELL";
+                        if (cashflowFilter === "income")
+                          return cf.type === "DIVIDEND" || cf.type === "INTEREST";
+                        return true;
+                      }),
+                      cashflowSort,
+                    ).map((cf, idx) => (
+                      <tr key={`${cf.date}-${cf.type}-${cf.asset}-${idx}`}>
                         <td className="mono">{cf.date}</td>
+                        <td className="mono">{cf.type}</td>
+                        <td className="mono">{cf.asset}</td>
                         <td className={`mono ${signedClass(cf.amount, showMode)}`}>
                           {money(cf.amount, showMode)}
                         </td>

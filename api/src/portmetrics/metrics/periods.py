@@ -376,18 +376,40 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
     return rows
 
 
-def dividend_summary(activities: list[Activity]) -> dict:
+def dividend_summary(
+    activities: list[Activity],
+    *,
+    as_of: date | None = None,
+) -> dict:
+    """Gross dividend/interest totals (all-time + YTD through as_of)."""
+    end = as_of or date.today()
+    year = end.year
     total = ZERO
+    ytd = ZERO
+    interest_total = ZERO
+    interest_ytd = ZERO
     by_asset: dict[str, Decimal] = {}
     for activity in activities:
-        if activity.type != "DIVIDEND":
+        if activity.trade_date > end:
             continue
         amount = _d(activity.quantity) * _d(activity.unit_price)
-        total += amount
-        key = _asset_key(activity)
-        by_asset[key] = by_asset.get(key, ZERO) + amount
+        in_year = activity.trade_date.year == year
+        if activity.type == "DIVIDEND":
+            total += amount
+            if in_year:
+                ytd += amount
+            key = _asset_key(activity)
+            by_asset[key] = by_asset.get(key, ZERO) + amount
+        elif activity.type == "INTEREST":
+            interest_total += amount
+            if in_year:
+                interest_ytd += amount
     return {
         "total": str(total),
+        "ytd": str(ytd),
+        "interest_total": str(interest_total),
+        "interest_ytd": str(interest_ytd),
+        "year": year,
         "by_isin": [{"isin": k, "amount": str(v)} for k, v in sorted(by_asset.items())],
     }
 
@@ -450,6 +472,7 @@ def rebuild_metrics_daily(session: Session, *, end: date | None = None) -> int:
 def overview_payload(session: Session, as_of: date | None = None) -> dict:
     from decimal import Decimal as D
 
+    from portmetrics.assets.identifiers import display_name_map, enrich_asset_fields, wkn_map
     from portmetrics.metrics.irr import cashflow_timeline, irr_payload
     from portmetrics.metrics.risk import position_drawdown, risk_payload
     from portmetrics.metrics.tax_allowance import tax_allowance_payload
@@ -467,6 +490,23 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
     invested = contrib - withdr
     portfolio_cfg = get_portfolio_settings(session)
     risk_free = D(portfolio_cfg["risk_free_rate"])
+    preference = portfolio_cfg["asset_id_preference"]
+    wkn_by_isin = wkn_map(session)
+    names_by_isin = display_name_map(session)
+    display_id_by_key: dict[str, str] = {}
+    for activity in activities:
+        key = _asset_key(activity)
+        if key in display_id_by_key:
+            continue
+        ids = enrich_asset_fields(
+            asset_key=key,
+            activity_isin=activity.isin,
+            symbol=activity.symbol,
+            wkn_by_isin=wkn_by_isin,
+            preference=preference,
+            display_name_by_isin=names_by_isin,
+        )
+        display_id_by_key[key] = ids["display_id"] or key
     mwr = irr_payload(activities, prices, as_of=end)
     positions = position_simple_return(session)
     for row in positions:
@@ -496,9 +536,9 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
         "annual_returns": [_annual_return_dict(row) for row in annual],
         "cagr": cagr(activities, prices, end=end),
         "mwr": mwr,
-        "cashflows": cashflow_timeline(activities),
+        "cashflows": cashflow_timeline(activities, display_id_by_key=display_id_by_key),
         "risk": risk_payload(activities, prices, as_of=end, risk_free_rate=risk_free),
         "tax_allowance": tax_allowance_payload(session, as_of=end),
-        "dividends": dividend_summary(activities),
+        "dividends": dividend_summary(activities, as_of=end),
         "positions": positions,
     }

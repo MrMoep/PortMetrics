@@ -104,8 +104,38 @@ def test_dividends_sum() -> None:
         currency="EUR",
         trade_date=date(2024, 3, 1),
     )
-    summary = dividend_summary([buy, div])
-    assert summary["total"] == "2.5"
+    prior = Activity(
+        id=3,
+        gf_activity_id=uuid4(),
+        account_id="a",
+        isin="IE00",
+        symbol="IE00",
+        type="DIVIDEND",
+        quantity=Decimal("1"),
+        unit_price=Decimal("1"),
+        fee=Decimal("0"),
+        currency="EUR",
+        trade_date=date(2023, 3, 1),
+    )
+    interest = Activity(
+        id=4,
+        gf_activity_id=uuid4(),
+        account_id="a",
+        isin="CASH",
+        symbol="CASH",
+        type="INTEREST",
+        quantity=Decimal("1"),
+        unit_price=Decimal("0.75"),
+        fee=Decimal("0"),
+        currency="EUR",
+        trade_date=date(2024, 6, 1),
+    )
+    summary = dividend_summary([buy, div, prior, interest], as_of=date(2024, 12, 31))
+    assert summary["total"] == "3.5"
+    assert summary["ytd"] == "2.5"
+    assert summary["interest_total"] == "0.75"
+    assert summary["interest_ytd"] == "0.75"
+    assert summary["year"] == 2024
 
 
 def test_standard_periods_and_cagr_smoke() -> None:
