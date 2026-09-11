@@ -320,6 +320,23 @@ export const api = {
       skipped: number;
       items: Array<Record<string, unknown>>;
     }>("/api/staging/match-activities", { method: "POST" }),
+  paperlessLinkPreview: () =>
+    request<{
+      document_count: number;
+      unlinked_lots: number;
+      filters_active: boolean;
+      warn_no_filter: boolean;
+      warn_large: boolean;
+      warning: string | null;
+    }>("/api/paperless/link-preview"),
+  linkLotDocument: (
+    lotId: number,
+    body: { paperless_doc_id?: number | null; paperless_ref?: string | null },
+  ) =>
+    request<Record<string, unknown>>(`/api/lots/${lotId}/link-document`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   paperlessSettings: () => request<PaperlessSettings>("/api/settings/paperless"),
   savePaperlessSettings: (body: {
     field_map?: Record<string, number | null>;

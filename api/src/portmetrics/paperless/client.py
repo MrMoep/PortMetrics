@@ -201,6 +201,73 @@ class PaperlessClient:
             return path, query
         return next_url, []
 
+    def count_documents(
+        self,
+        *,
+        tag: str | None = None,
+        tag_ids: list[int] | None = None,
+        document_type_ids: list[int] | None = None,
+        request_timeout: float | None = None,
+    ) -> int:
+        """Return document count for the same filters as ``list_documents``."""
+        type_ids = list(document_type_ids or [])
+        type_passes: list[int | None] = type_ids if type_ids else [None]
+        if len(type_passes) == 1:
+            return self._count_one_filter(
+                tag=tag,
+                tag_ids=tag_ids,
+                document_type_id=type_passes[0],
+                request_timeout=request_timeout,
+            )
+        by_id: set[int] = set()
+        for type_id in type_passes:
+            for page_docs in self._iter_document_pages(
+                page_size=100,
+                tag=tag,
+                tag_ids=tag_ids,
+                document_type_id=type_id,
+                paginate=True,
+                request_timeout=request_timeout,
+            ):
+                for doc in page_docs:
+                    doc_id = doc.get("id")
+                    if doc_id is not None:
+                        by_id.add(int(doc_id))
+        return len(by_id)
+
+    def _count_one_filter(
+        self,
+        *,
+        tag: str | None,
+        tag_ids: list[int] | None,
+        document_type_id: int | None,
+        request_timeout: float | None,
+    ) -> int:
+        params: list[tuple[str, str | int]] = [
+            ("page_size", 1),
+            ("ordering", "-created"),
+        ]
+        if tag_ids:
+            for tid in tag_ids:
+                params.append(("tags__id", int(tid)))
+        elif tag:
+            params.append(("tags__name__iexact", tag))
+        if document_type_id is not None:
+            params.append(("document_type__id", int(document_type_id)))
+        with self._client(timeout=request_timeout) as client:
+            response = client.get("/api/documents/", params=params)
+            if response.status_code >= 400:
+                raise PaperlessError(
+                    f"Paperless documents failed ({response.status_code}): {response.text}"
+                )
+            payload = response.json()
+            if isinstance(payload, list):
+                return len(payload)
+            raw = payload.get("count")
+            if raw is not None:
+                return int(raw)
+            return len(payload.get("results") or [])
+
     def get_document(self, document_id: int) -> dict[str, Any]:
         with self._client() as client:
             response = client.get(f"/api/documents/{document_id}/")
