@@ -7,6 +7,7 @@
 - Ghostfolio-Sync **Orphan-Prune**: lokal fehlende GF-Activities werden entfernt; Staging `imported` → `pending`; Statuszeile zeigt gelöschte Anzahl
 - Optional `display_name` in Kennungs-Tabelle; Anzeige-Präferenz `name` (Fallback Symbol), Default bleibt `symbol`
 - Nach Staging-**Confirm** läuft automatisch ein stiller Ghostfolio-Mirror (Activities → Preise → FIFO → Metrics), damit Lots/Overview ohne manuellen Sync aktuell sind
+- Belege-Verknüpfen: unverknüpfte FIFO-Lots → gefilterte Paperless-Docs; Scope-Preview (Count/Warnung) auch für Full Sync; Staging wird bei Match auf `imported` gesetzt
 
 ### Fixed
 - Assets-Tabelle nutzt volle Panel-Breite; Staging→Tabelle übernimmt ISIN/WKN (und Symbol-Vorschlag) in den Entwurf

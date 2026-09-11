@@ -19,6 +19,9 @@ Basis-URL im Container: `http://host:8080`
 | `GET` | `/api/positions` | Einfache Positionsrendite |
 | `GET` | `/api/staging` | Paperless-Review-Queue |
 | `POST` | `/api/staging/sync` | Paperless → Staging (`skip_reasons` bei skips) |
+| `POST` | `/api/staging/match-activities` | Unverknüpfte Lots → Paperless-Docs |
+| `GET` | `/api/paperless/link-preview` | Scope-Preview (Doc-Count, unverknüpfte Lots) |
+| `POST` | `/api/lots/{id}/link-document` | Manuell Beleg (ID/URL) an Lot |
 | `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio + stiller Mirror (best-effort) |
 | `POST` | `/api/staging/{id}/reject` | Staging ablehnen |
 | `POST` | `/api/webhooks/paperless` | Paperless Auto-Ingest (Shared Secret) |

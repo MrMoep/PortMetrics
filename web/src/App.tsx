@@ -845,10 +845,34 @@ export default function App() {
     }
   }
 
+  async function confirmPaperlessScope(actionLabel: string): Promise<boolean> {
+    setStatus(`${actionLabel}: Scope prüfen…`);
+    const preview = await api.paperlessLinkPreview();
+    if (preview.warn_no_filter) {
+      const ok = window.confirm(
+        preview.warning ||
+          `${actionLabel} ohne Tag-/Dokumententyp-Filter (${preview.document_count} Docs). Fortfahren?`,
+      );
+      if (!ok) return false;
+    } else if (preview.warn_large) {
+      const ok = window.confirm(
+        preview.warning ||
+          `${actionLabel}: ${preview.document_count} Docs im Filter, ${preview.unlinked_lots} unverknüpfte Lots. Fortfahren?`,
+      );
+      if (!ok) return false;
+    }
+    return true;
+  }
+
   async function onMatchActivities() {
     setError("");
-    setStatus("Belege verknüpfen…");
     try {
+      const ok = await confirmPaperlessScope("Belege verknüpfen");
+      if (!ok) {
+        setStatus("");
+        return;
+      }
+      setStatus("Belege verknüpfen…");
       const result = await api.stagingMatchActivities();
       await refresh();
       setStatus(
@@ -861,17 +885,18 @@ export default function App() {
   }
 
   async function runPaperlessSync(mode: "partial" | "full") {
-    const hasFilters =
-      syncTagsDraft.length > 0 ||
-      syncDocTypesDraft.length > 0 ||
-      (paperlessSettings?.sync_tags?.length ?? 0) > 0 ||
-      (paperlessSettings?.sync_document_types?.length ?? 0) > 0 ||
-      Boolean(paperlessSettings?.tag);
-    if (mode === "full" && !hasFilters) {
-      const ok = window.confirm(
-        "Full Sync ohne Tag-/Dokumententyp-Filter. Bei großen Archiven (1000+ Docs) kann das mehrere Minuten dauern. Fortfahren?",
-      );
-      if (!ok) return;
+    if (mode === "full") {
+      try {
+        const ok = await confirmPaperlessScope("Full Sync");
+        if (!ok) {
+          setStatus("");
+          return;
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+        setStatus("");
+        return;
+      }
     }
     setError("");
     setStatus(mode === "full" ? "Full Sync Paperless…" : "Teilsync Paperless…");
@@ -1889,9 +1914,10 @@ export default function App() {
                   </button>
                 </div>
                 <p className="muted">
-                  Verknüpfen ist manuell: offene Staging-Einträge werden per Typ + ISIN + Datum +
-                  Stückzahl an bestehende Activities gematcht (Kurs nur als Tie-Breaker). Kein
-                  erneuter Ghostfolio-Import. Mehrdeutige bleiben in der Queue.
+                  Verknüpfen läuft über unverknüpfte FIFO-Lots → gefilterte Paperless-Docs (Typ +
+                  ISIN + Datum + Stück; Kurs als Tie-Breaker). Vor dem Lauf: Scope-Preview inkl.
+                  Warnung ohne Filter / bei vielen Docs. Getroffene Staging-Zeilen werden auf
+                  imported gesetzt (nicht mehr in der offenen Queue). Kein Ghostfolio-Import.
                 </p>
                 {(paperlessSettings?.role_meta ?? FALLBACK_ROLE_META).map((meta) => (
                   <label key={meta.role}>

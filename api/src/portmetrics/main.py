@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -50,7 +51,11 @@ from portmetrics.paperless.mapping import (
     has_sync_filters,
     save_paperless_settings,
 )
-from portmetrics.paperless.match import match_staging_to_activities
+from portmetrics.paperless.match import (
+    link_lot_to_document,
+    match_lots_to_documents,
+    preview_link_scope,
+)
 from portmetrics.paperless.staging import (
     SYNC_MODE_FULL,
     SYNC_MODE_PARTIAL,
@@ -702,10 +707,35 @@ def staging_reject(staging_id: int, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/api/paperless/link-preview")
+def paperless_link_preview(db: Session = Depends(get_db)) -> dict:
+    """Preview filtered Paperless doc count and unlinked lot count (cheap)."""
+    client = _paperless_client()
+    try:
+        preview = preview_link_scope(db, client)
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "document_count": preview.document_count,
+        "unlinked_lots": preview.unlinked_lots,
+        "filters_active": preview.filters_active,
+        "warn_no_filter": preview.warn_no_filter,
+        "warn_large": preview.warn_large,
+        "warning": preview.warning,
+    }
+
+
 @app.post("/api/staging/match-activities")
 def staging_match_activities(db: Session = Depends(get_db)) -> dict:
-    """Manually link open staging docs to existing Ghostfolio activities (no GF import)."""
-    result = match_staging_to_activities(db)
+    """Link unlinked FIFO lots to filtered Paperless docs (no GF import)."""
+    client = _paperless_client()
+    try:
+        result = match_lots_to_documents(db, client)
+    except (PaperlessError, ValueError) as exc:
+        raise HTTPException(
+            status_code=502 if isinstance(exc, PaperlessError) else 400,
+            detail=str(exc),
+        ) from exc
     return {
         "scanned": result.scanned,
         "matched": result.matched,
@@ -714,6 +744,38 @@ def staging_match_activities(db: Session = Depends(get_db)) -> dict:
         "skipped": result.skipped,
         "items": result.items,
     }
+
+
+class LotDocumentLinkBody(BaseModel):
+    paperless_doc_id: int | None = None
+    paperless_ref: str | None = Field(
+        default=None,
+        description="Document id or Paperless URL containing /documents/<id>",
+    )
+
+
+@app.post("/api/lots/{lot_id}/link-document")
+def lots_link_document(
+    lot_id: int,
+    body: LotDocumentLinkBody,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manually link a Paperless document id/URL to a FIFO lot."""
+    client = _paperless_client()
+    try:
+        return link_lot_to_document(
+            db,
+            client,
+            lot_id=lot_id,
+            paperless_doc_id=body.paperless_doc_id,
+            paperless_ref=body.paperless_ref,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 if WEB_DIST.is_dir():
