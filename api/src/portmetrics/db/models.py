@@ -179,7 +179,7 @@ class DocumentLink(Base):
 
 
 class AssetIdentifier(Base):
-    """ISIN → WKN map learned from Paperless documents that carry both."""
+    """ISIN → WKN / preferred Ghostfolio symbol (table is source of truth)."""
 
     __tablename__ = "asset_identifiers"
     __table_args__ = (
@@ -188,7 +188,8 @@ class AssetIdentifier(Base):
     )
 
     isin: Mapped[str] = mapped_column(Text, primary_key=True)
-    wkn: Mapped[str] = mapped_column(Text, nullable=False)
+    wkn: Mapped[str | None] = mapped_column(Text)
+    preferred_symbol: Mapped[str | None] = mapped_column(Text)
     paperless_doc_id: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

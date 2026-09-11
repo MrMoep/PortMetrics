@@ -17,6 +17,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from portmetrics import __version__
+from portmetrics.assets.identifiers import (
+    apply_symbol_suggestion,
+    list_identifiers,
+    replace_mappings,
+    serialize_identifier,
+)
 from portmetrics.build_info import built_at, display_version, git_sha, image_channel
 from portmetrics.config import settings, webhook_secret_matches
 from portmetrics.db.models import Activity, SyncState
@@ -458,7 +464,10 @@ def _paperless_settings_payload(cfg: dict) -> dict:
         "notes": {
             "trade_date": "Handelsdatum = Paperless-Dokumentdatum (created), kein Custom Field.",
             "currency": "Währung aus Monetary-Feldern Kurs/Entgelte (z.B. EUR152.34).",
-            "symbol": "Ghostfolio-Symbol = ISIN (kein separates Symbol-Feld).",
+            "symbol": (
+                "Ghostfolio-Import nutzt preferred_symbol aus Kennungs-Tabelle "
+                "(Einstellungen → Assets); ISIN bleibt kanonisch."
+            ),
             "public_url": "Browser-URL für Doc-Links; Fallback PAPERLESS_URL (Env).",
             "sync_filters": (
                 "Teilsync: neueste ≤100 Docs. Full Sync: alle Seiten. "
@@ -495,6 +504,42 @@ def settings_portfolio_put(payload: dict, db: Session = Depends(get_db)) -> dict
         return save_portfolio_settings(db, payload)
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/settings/assets")
+def settings_assets_get(db: Session = Depends(get_db)) -> dict:
+    return {"items": list_identifiers(db)}
+
+
+@app.put("/api/settings/assets")
+def settings_assets_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be a list")
+    try:
+        saved = replace_mappings(db, items)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"items": saved}
+
+
+@app.post("/api/settings/assets/apply-suggestion")
+def settings_assets_apply_suggestion(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        row = apply_symbol_suggestion(
+            db,
+            isin=str(payload.get("isin") or ""),
+            symbol=payload.get("symbol"),
+            wkn=payload.get("wkn"),
+            paperless_doc_id=(
+                int(payload["paperless_doc_id"])
+                if payload.get("paperless_doc_id") is not None
+                else None
+            ),
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return serialize_identifier(row)
 
 
 @app.get("/api/settings/paperless/custom-fields")

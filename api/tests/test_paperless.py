@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 import httpx
@@ -433,12 +434,23 @@ def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
     row.status = STATUS_PENDING
     gf_id = uuid4()
 
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    upsert_mapping(
+        db_session,
+        isin="IE00BK5BQT80",
+        wkn="A1JX52",
+        preferred_symbol="VWCE.DE",
+    )
+
     def gf_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/auth/anonymous"):
             return httpx.Response(200, json={"authToken": "jwt"})
         if request.url.path.endswith("/import"):
-            body = request.read()
-            assert b"IE00BK5BQT80" in body
+            body = json.loads(request.content.decode())
+            activity = body["activities"][0]
+            assert activity["symbol"] == "VWCE.DE"
+            assert "IE00BK5BQT80" in activity["comment"]
             return httpx.Response(201, json={"activities": [{"id": str(gf_id)}]})
         raise AssertionError(request.url.path)
 
@@ -450,6 +462,8 @@ def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
     confirmed = confirm_staging(db_session, row.id, ghostfolio, paperless=None)
     assert confirmed["status"] == STATUS_IMPORTED
     assert confirmed["gf_activity_id"] == str(gf_id)
+    assert confirmed["mapping"]["preferred_symbol"] == "VWCE.DE"
+    assert confirmed["can_confirm"] is False  # already imported
     links = db_session.scalars(select(DocumentLink)).all()
     assert len(links) == 1
     assert links[0].paperless_doc_id == 99
@@ -458,6 +472,24 @@ def test_reject_and_confirm_staging(db_session, monkeypatch) -> None:
     ident = db_session.get(AssetIdentifier, "IE00BK5BQT80")
     assert ident is not None
     assert ident.wkn == "A1JX52"
+    assert ident.preferred_symbol == "VWCE.DE"
+
+
+def test_confirm_blocked_without_preferred_symbol(db_session) -> None:
+    row = StagingImport(
+        paperless_doc_id=88,
+        payload=build_staging_payload(_doc(88), extract_custom_fields(_doc(88), FIELD_MAP)),
+        status=STATUS_PENDING,
+    )
+    db_session.add(row)
+    db_session.flush()
+    ghostfolio = GhostfolioClient(
+        "http://ghostfolio.test",
+        "tok",
+        transport=httpx.MockTransport(lambda _r: httpx.Response(500)),
+    )
+    with pytest.raises(ValueError, match="preferred Symbol"):
+        confirm_staging(db_session, row.id, ghostfolio)
 
 
 def test_confirm_other_rejected(db_session) -> None:

@@ -120,6 +120,66 @@ def test_backfill_from_staging(db_session: Session) -> None:
     assert row.wkn == "A1JX52"
 
 
+def test_suggest_symbol_majority_and_wkn_conflict(db_session: Session) -> None:
+    from portmetrics.assets.identifiers import (
+        apply_symbol_suggestion,
+        suggest_symbol_from_history,
+        upsert_mapping,
+        wkn_conflict,
+    )
+
+    for i, symbol in enumerate(["VGWL.DE", "VGWL.DE", "VWRD.L"]):
+        db_session.add(
+            Activity(
+                gf_activity_id=uuid4(),
+                account_id="acc",
+                isin="IE00BK5BQT80",
+                symbol=symbol,
+                type="BUY",
+                quantity=Decimal("1"),
+                unit_price=Decimal("100"),
+                fee=Decimal("0"),
+                currency="EUR",
+                trade_date=date(2024, 1, i + 1),
+            )
+        )
+    db_session.flush()
+    suggestion = suggest_symbol_from_history(db_session, "IE00BK5BQT80")
+    assert suggestion is not None
+    assert suggestion.symbol == "VGWL.DE"
+    assert suggestion.count == 2
+
+    apply_symbol_suggestion(
+        db_session,
+        isin="IE00BK5BQT80",
+        wkn="A1JX52",
+    )
+    row = db_session.get(AssetIdentifier, "IE00BK5BQT80")
+    assert row is not None
+    assert row.preferred_symbol == "VGWL.DE"
+    assert row.wkn == "A1JX52"
+
+    conflict = wkn_conflict(table_wkn="A1JX52", observed_wkn="WRONG1")
+    assert conflict is not None
+    assert "WRONG1" in conflict.message
+
+    # Learning must not overwrite table WKN
+    upsert_isin_wkn(db_session, isin="IE00BK5BQT80", wkn="WRONG1")
+    db_session.refresh(row)
+    assert row.wkn == "A1JX52"
+
+    upsert_mapping(
+        db_session,
+        isin="IE00B4L5YC18",
+        preferred_symbol="SXR8.DE",
+        clear_missing=True,
+    )
+    bare = db_session.get(AssetIdentifier, "IE00B4L5YC18")
+    assert bare is not None
+    assert bare.wkn is None
+    assert bare.preferred_symbol == "SXR8.DE"
+
+
 def test_portfolio_asset_id_preference_default(db_session: Session) -> None:
     cfg = get_portfolio_settings(db_session)
     assert cfg["asset_id_preference"] == "symbol"
