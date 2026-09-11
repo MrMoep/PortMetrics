@@ -75,6 +75,7 @@ describe("formatters", () => {
   it("assetIdColumnLabel", () => {
     expect(assetIdColumnLabel("wkn")).toBe("WKN");
     expect(assetIdColumnLabel("isin")).toBe("ISIN");
+    expect(assetIdColumnLabel("name")).toBe("Name");
     expect(assetIdColumnLabel("symbol")).toBe("Symbol");
     expect(assetIdColumnLabel(null)).toBe("Symbol");
   });

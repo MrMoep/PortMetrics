@@ -373,7 +373,9 @@ export default function App() {
   const [allowanceDraft, setAllowanceDraft] = useState("1000");
   const [warnPctDraft, setWarnPctDraft] = useState("0.85");
   const [riskFreeDraft, setRiskFreeDraft] = useState("0");
-  const [assetIdPrefDraft, setAssetIdPrefDraft] = useState<"symbol" | "wkn" | "isin">("symbol");
+  const [assetIdPrefDraft, setAssetIdPrefDraft] = useState<"symbol" | "wkn" | "isin" | "name">(
+    "symbol",
+  );
   const [cashflowSort, setCashflowSort] = useState<SortState>({ key: "date", dir: "desc" });
   const [lotsSort, setLotsSort] = useState<SortState>({ key: "open_date", dir: "desc" });
   const [positionsSort, setPositionsSort] = useState<SortState>({ key: "invested", dir: "desc" });
@@ -733,6 +735,7 @@ export default function App() {
           isin: row.isin.trim().toUpperCase(),
           wkn: row.wkn?.trim() ? row.wkn.trim().toUpperCase() : null,
           preferred_symbol: row.preferred_symbol?.trim() ? row.preferred_symbol.trim() : null,
+          display_name: row.display_name?.trim() ? row.display_name.trim() : null,
           paperless_doc_id: row.paperless_doc_id ?? null,
         }))
         .filter((row) => row.isin);
@@ -791,6 +794,7 @@ export default function App() {
             isin,
             wkn,
             preferred_symbol: suggested,
+            display_name: null,
             paperless_doc_id: item.paperless_doc_id,
           },
         ];
@@ -1584,16 +1588,19 @@ export default function App() {
                   <select
                     value={assetIdPrefDraft}
                     onChange={(e) =>
-                      setAssetIdPrefDraft(e.target.value as "symbol" | "wkn" | "isin")
+                      setAssetIdPrefDraft(
+                        e.target.value as "symbol" | "wkn" | "isin" | "name",
+                      )
                     }
                   >
                     <option value="symbol">Symbol (Ghostfolio-Standard)</option>
-                    <option value="wkn">WKN (aus Paperless-Mapping)</option>
+                    <option value="name">Name (display_name)</option>
+                    <option value="wkn">WKN (aus Kennungs-Tabelle)</option>
                     <option value="isin">ISIN</option>
                   </select>
                   <span className="muted">
-                    Fallback-Kette: gewählte Kennung → Symbol/ISIN/WKN → Asset-Key. WKN wird gelernt,
-                    sobald ein Paperless-Beleg ISIN und WKN enthält.
+                    Bei „Name“: display_name → Symbol → ISIN/WKN. Ohne Name Fallback auf Symbol.
+                    Default bleibt Symbol; Einstellung speicherbar.
                   </span>
                 </label>
                 <button className="primary" type="submit">
@@ -1606,16 +1613,17 @@ export default function App() {
           {settingsSection === "assets" && (
             <Panel label="Assets / Kennungen">
               <p className="muted">
-                Übersetzungstabelle ISIN → WKN / preferred Ghostfolio-Symbol. Die Tabelle ist Source of
-                Truth: Paperless lernt WKN nur, wenn die Zelle leer ist; Abweichungen blockieren den
-                Import. Confirm ohne preferred Symbol ist gesperrt. Data Source bleibt global unter
-                Ghostfolio.
+                Übersetzungstabelle ISIN → WKN / preferred Symbol / display_name. Die Tabelle ist
+                Source of Truth: Paperless lernt WKN nur, wenn die Zelle leer ist; Abweichungen
+                blockieren den Import. Confirm ohne preferred Symbol ist gesperrt. display_name ist
+                optional und nur manuell — für lesbare Labels in Lots/Positionen.
               </p>
               <form className="form form-assets" onSubmit={(e) => void onSaveAssets(e)}>
                 <div className="table-wrap">
                   <table className="assets-table">
                     <thead>
                       <tr>
+                        <th>Name</th>
                         <th>ISIN</th>
                         <th>WKN</th>
                         <th>Preferred Symbol</th>
@@ -1625,6 +1633,20 @@ export default function App() {
                     <tbody>
                       {assetDraft.map((row, idx) => (
                         <tr key={`${row.isin}-${idx}`}>
+                          <td>
+                            <input
+                              value={row.display_name ?? ""}
+                              onChange={(e) => {
+                                const next = [...assetDraft];
+                                next[idx] = {
+                                  ...row,
+                                  display_name: e.target.value || null,
+                                };
+                                setAssetDraft(next);
+                              }}
+                              placeholder="Vanguard FTSE All-World"
+                            />
+                          </td>
                           <td>
                             <input
                               className="mono"
@@ -1686,7 +1708,12 @@ export default function App() {
                     onClick={() =>
                       setAssetDraft([
                         ...assetDraft,
-                        { isin: "", wkn: null, preferred_symbol: null },
+                        {
+                          isin: "",
+                          wkn: null,
+                          preferred_symbol: null,
+                          display_name: null,
+                        },
                       ])
                     }
                   >

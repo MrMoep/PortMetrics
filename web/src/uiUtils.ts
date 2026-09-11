@@ -111,5 +111,6 @@ export function sortRows<T>(rows: T[], sort: SortState): T[] {
 export function assetIdColumnLabel(pref: string | null | undefined): string {
   if (pref === "wkn") return "WKN";
   if (pref === "isin") return "ISIN";
+  if (pref === "name") return "Name";
   return "Symbol";
 }
