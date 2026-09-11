@@ -9,6 +9,7 @@
 - Nach Staging-**Confirm** läuft automatisch ein stiller Ghostfolio-Mirror (Activities → Preise → FIFO → Metrics), damit Lots/Overview ohne manuellen Sync aktuell sind
 - Belege-Verknüpfen: unverknüpfte FIFO-Lots → gefilterte Paperless-Docs; Scope-Preview (Count/Warnung) auch für Full Sync; Staging wird bei Match auf `imported` gesetzt
 - FIFO-Lots: Strich in Beleg-Spalte öffnet Maske für manuelle Doc-ID/URL-Verknüpfung
+- Paperless-Icon: Marken-Silhouette (monochrom) statt generischem Dokument-Symbol
 
 ### Fixed
 - Assets-Tabelle nutzt volle Panel-Breite; Staging→Tabelle übernimmt ISIN/WKN (und Symbol-Vorschlag) in den Entwurf
