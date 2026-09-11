@@ -71,6 +71,23 @@ export type Lot = {
   unrealized_gain_pct: string | null;
 };
 
+export type StagingMapping = {
+  isin: string | null;
+  preferred_symbol: string | null;
+  table_wkn: string | null;
+  suggested_symbol: string | null;
+  suggested_count: number | null;
+  suggested_last_trade_date: string | null;
+  wkn_conflict: {
+    table_value: string;
+    observed_value: string;
+    message: string;
+  } | null;
+  needs_mapping: boolean;
+  mapping_ready: boolean;
+  settings_href: string;
+};
+
 export type StagingItem = {
   id: number;
   paperless_doc_id: number;
@@ -90,6 +107,16 @@ export type StagingItem = {
   };
   gf_activity_id: string | null;
   error: string | null;
+  mapping?: StagingMapping;
+  can_confirm?: boolean;
+};
+
+export type AssetIdentifierRow = {
+  isin: string;
+  wkn: string | null;
+  preferred_symbol: string | null;
+  paperless_doc_id?: number | null;
+  updated_at?: string | null;
 };
 
 export type VersionInfo = {
@@ -293,6 +320,22 @@ export const api = {
   }) =>
     request<PortfolioSettings>("/api/settings/portfolio", {
       method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  assetIdentifiers: () => request<{ items: AssetIdentifierRow[] }>("/api/settings/assets"),
+  saveAssetIdentifiers: (items: AssetIdentifierRow[]) =>
+    request<{ items: AssetIdentifierRow[] }>("/api/settings/assets", {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    }),
+  applyAssetSuggestion: (body: {
+    isin: string;
+    symbol?: string | null;
+    wkn?: string | null;
+    paperless_doc_id?: number | null;
+  }) =>
+    request<AssetIdentifierRow>("/api/settings/assets/apply-suggestion", {
+      method: "POST",
       body: JSON.stringify(body),
     }),
   paperlessCustomFields: () =>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   api,
+  AssetIdentifierRow,
   Lot,
   Overview,
   PaperlessField,
@@ -358,6 +359,8 @@ export default function App() {
   const [version, setVersion] = useState<VersionInfo>(FALLBACK_VERSION);
   const [paperlessSettings, setPaperlessSettings] = useState<PaperlessSettings | null>(null);
   const [portfolioSettings, setPortfolioSettings] = useState<PortfolioSettings | null>(null);
+  const [assetRows, setAssetRows] = useState<AssetIdentifierRow[]>([]);
+  const [assetDraft, setAssetDraft] = useState<AssetIdentifierRow[]>([]);
   const [customFields, setCustomFields] = useState<PaperlessField[]>([]);
   const [paperlessTags, setPaperlessTags] = useState<PaperlessIdName[]>([]);
   const [paperlessDocTypes, setPaperlessDocTypes] = useState<PaperlessIdName[]>([]);
@@ -380,18 +383,21 @@ export default function App() {
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [ov, lotData, stagingData, versionInfo, portfolio, paperless] = await Promise.all([
+      const [ov, lotData, stagingData, versionInfo, portfolio, paperless, assets] = await Promise.all([
         api.overview(),
         api.lots(),
         api.staging(),
         api.version().catch(() => FALLBACK_VERSION),
         api.portfolioSettings().catch(() => null),
         api.paperlessSettings().catch(() => null),
+        api.assetIdentifiers().catch(() => ({ items: [] as AssetIdentifierRow[] })),
       ]);
       setOverview(ov);
       setLots(lotData.lots);
       setStaging(stagingData.items);
       setVersion(versionInfo);
+      setAssetRows(assets.items);
+      setAssetDraft(assets.items.map((row) => ({ ...row })));
       if (portfolio) {
         setPortfolioSettings(portfolio);
         setAssetIdPrefDraft(portfolio.asset_id_preference || "symbol");
@@ -523,7 +529,12 @@ export default function App() {
     if (section === "portfolio") return isPortfolioDirty();
     if (section === "paperless") return isPaperlessDirty();
     if (section === "ghostfolio") return isGhostfolioDirty();
+    if (section === "assets") return isAssetsDirty();
     return false;
+  }
+
+  function isAssetsDirty(): boolean {
+    return JSON.stringify(assetDraft) !== JSON.stringify(assetRows);
   }
 
   function discardSectionDrafts(section: SettingsSection) {
@@ -532,6 +543,9 @@ export default function App() {
     }
     if ((section === "paperless" || section === "ghostfolio") && paperlessSettings) {
       applyPaperlessDrafts(paperlessSettings);
+    }
+    if (section === "assets") {
+      setAssetDraft(assetRows.map((row) => ({ ...row })));
     }
   }
 
@@ -703,6 +717,51 @@ export default function App() {
       applyPaperlessDrafts(saved);
       setStatus("Ghostfolio-Defaults gespeichert");
       await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
+  async function onSaveAssets(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setStatus("Kennungen speichern…");
+    try {
+      const cleaned = assetDraft
+        .map((row) => ({
+          isin: row.isin.trim().toUpperCase(),
+          wkn: row.wkn?.trim() ? row.wkn.trim().toUpperCase() : null,
+          preferred_symbol: row.preferred_symbol?.trim() ? row.preferred_symbol.trim() : null,
+          paperless_doc_id: row.paperless_doc_id ?? null,
+        }))
+        .filter((row) => row.isin);
+      const saved = await api.saveAssetIdentifiers(cleaned);
+      setAssetRows(saved.items);
+      setAssetDraft(saved.items.map((row) => ({ ...row })));
+      setStatus(`Kennungen gespeichert (${saved.items.length})`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setStatus("");
+    }
+  }
+
+  async function onApplySuggestion(item: StagingItem) {
+    const isin = item.payload.isin || item.mapping?.isin;
+    const symbol = item.mapping?.suggested_symbol;
+    if (!isin || !symbol) return;
+    setError("");
+    setStatus("Vorschlag übernehmen…");
+    try {
+      await api.applyAssetSuggestion({
+        isin,
+        symbol,
+        wkn: item.payload.wkn ?? null,
+        paperless_doc_id: item.paperless_doc_id,
+      });
+      await refresh();
+      setStatus(`Symbol ${symbol} für ${isin} übernommen`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("");
@@ -1205,9 +1264,9 @@ export default function App() {
       {tab === "staging" && (
         <Panel label="Staging Queue" meta={`${staging.length} OFFEN`}>
             <p className="muted">
-              Offene Review-Queue aus Paperless. Confirm importiert nach Ghostfolio; danach Sync
-              ausführen. Erledigte Einträge (confirm/reject) erscheinen nicht mehr — auch nicht bei
-              erneutem Webhook. Typ OTHER ist sichtbar, aber nicht importierbar.
+              Offene Review-Queue aus Paperless. Confirm braucht ein preferred Symbol in der
+              Kennungs-Tabelle (Einstellungen → Assets). Historien-Vorschläge nur anzeigen —
+              „Übernehmen“ schreibt in die Tabelle.
             </p>
             <div className="settings-actions" style={{ marginBottom: "0.75rem" }}>
               <button type="button" onClick={() => void runPaperlessSync("partial")}>
@@ -1226,6 +1285,7 @@ export default function App() {
                   <th>Status</th>
                   <th>Typ</th>
                   <th>ISIN</th>
+                  <th>Symbol</th>
                   <th>Menge</th>
                   <th>Kurs</th>
                   <th>Datum</th>
@@ -1236,6 +1296,17 @@ export default function App() {
                 {staging.map((item) => {
                   const importable =
                     item.payload.importable !== false && item.payload.wp_typ !== "OTHER";
+                  const mapping = item.mapping;
+                  const canConfirm = item.can_confirm === true;
+                  const mappingHint = mapping?.wkn_conflict
+                    ? mapping.wkn_conflict.message
+                    : mapping?.needs_mapping
+                      ? mapping.suggested_symbol
+                        ? `Kein Mapping — Vorschlag: ${mapping.suggested_symbol}`
+                        : "Kein preferred Symbol in der Kennungs-Tabelle"
+                      : mapping?.preferred_symbol
+                        ? `Import: ${mapping.preferred_symbol}`
+                        : null;
                   return (
                   <tr key={item.id}>
                     <td className="mono">{item.id}</td>
@@ -1259,18 +1330,55 @@ export default function App() {
                     <td>{item.status}</td>
                     <td>{item.payload.wp_typ ?? "—"}</td>
                     <td className="mono">{item.payload.isin ?? item.payload.symbol ?? "—"}</td>
+                    <td>
+                      <div className="doc-cell">
+                        <span className="mono">
+                          {mapping?.preferred_symbol ??
+                            mapping?.suggested_symbol ??
+                            "—"}
+                        </span>
+                        {(mapping?.needs_mapping || mapping?.wkn_conflict) && (
+                          <button
+                            type="button"
+                            className="linkish"
+                            onClick={() => {
+                              if (!confirmDiscard(settingsSection)) return;
+                              setTab("settings");
+                              setSettingsSection("assets");
+                              writeSettingsHash("assets");
+                            }}
+                          >
+                            Tabelle
+                          </button>
+                        )}
+                      </div>
+                      {mappingHint ? <p className="muted">{mappingHint}</p> : null}
+                    </td>
                     <td className="mono">{qty(item.payload.quantity, showMode)}</td>
                     <td className="mono">{money(item.payload.unit_price, showMode)}</td>
                     <td className="mono">{item.payload.trade_date ?? "—"}</td>
                     <td className="row-actions">
+                      {mapping?.needs_mapping && mapping.suggested_symbol ? (
+                        <button
+                          type="button"
+                          onClick={() => void onApplySuggestion(item)}
+                          title="Historien-Vorschlag in Kennungs-Tabelle schreiben"
+                        >
+                          Übernehmen
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className="primary"
-                        disabled={item.status === "imported" || !importable}
+                        disabled={!canConfirm || !importable}
                         title={
-                          importable
-                            ? undefined
-                            : "Typ OTHER / nicht importierbar — in Paperless korrigieren"
+                          !importable
+                            ? "Typ OTHER / nicht importierbar — in Paperless korrigieren"
+                            : mapping?.wkn_conflict
+                              ? mapping.wkn_conflict.message
+                              : mapping?.needs_mapping
+                                ? "Preferred Symbol fehlt — Kennungs-Tabelle pflegen"
+                                : undefined
                         }
                         onClick={() =>
                           void runAction(`Confirm #${item.id}`, () => api.stagingConfirm(item.id))
@@ -1463,6 +1571,103 @@ export default function App() {
                 <button className="primary" type="submit">
                   Speichern
                 </button>
+              </form>
+            </Panel>
+          )}
+
+          {settingsSection === "assets" && (
+            <Panel label="Assets / Kennungen">
+              <p className="muted">
+                Übersetzungstabelle ISIN → WKN / preferred Ghostfolio-Symbol. Die Tabelle ist Source of
+                Truth: Paperless lernt WKN nur, wenn die Zelle leer ist; Abweichungen blockieren den
+                Import. Confirm ohne preferred Symbol ist gesperrt. Data Source bleibt global unter
+                Ghostfolio.
+              </p>
+              <form className="form form-wide" onSubmit={(e) => void onSaveAssets(e)}>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ISIN</th>
+                        <th>WKN</th>
+                        <th>Preferred Symbol</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assetDraft.map((row, idx) => (
+                        <tr key={`${row.isin}-${idx}`}>
+                          <td>
+                            <input
+                              className="mono"
+                              value={row.isin}
+                              onChange={(e) => {
+                                const next = [...assetDraft];
+                                next[idx] = { ...row, isin: e.target.value };
+                                setAssetDraft(next);
+                              }}
+                              placeholder="IE00BK5BQT80"
+                              required
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="mono"
+                              value={row.wkn ?? ""}
+                              onChange={(e) => {
+                                const next = [...assetDraft];
+                                next[idx] = { ...row, wkn: e.target.value || null };
+                                setAssetDraft(next);
+                              }}
+                              placeholder="A1JX52"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="mono"
+                              value={row.preferred_symbol ?? ""}
+                              onChange={(e) => {
+                                const next = [...assetDraft];
+                                next[idx] = {
+                                  ...row,
+                                  preferred_symbol: e.target.value || null,
+                                };
+                                setAssetDraft(next);
+                              }}
+                              placeholder="VWCE.DE"
+                            />
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setAssetDraft(assetDraft.filter((_, i) => i !== idx))
+                              }
+                            >
+                              Entfernen
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="settings-actions">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAssetDraft([
+                        ...assetDraft,
+                        { isin: "", wkn: null, preferred_symbol: null },
+                      ])
+                    }
+                  >
+                    Zeile hinzufügen
+                  </button>
+                  <button className="primary" type="submit">
+                    Speichern
+                  </button>
+                </div>
               </form>
             </Panel>
           )}

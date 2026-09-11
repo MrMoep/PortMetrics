@@ -20,6 +20,7 @@ describe("parseSettingsHash / settingsHash", () => {
     expect(parseSettingsHash("#settings/ops")).toBe("ops");
     expect(parseSettingsHash("#settings/portfolio")).toBe("portfolio");
     expect(parseSettingsHash("#SETTINGS/Paperless")).toBe("paperless");
+    expect(parseSettingsHash("#settings/assets")).toBe("assets");
   });
 
   it("rejects unknown or malformed hashes", () => {

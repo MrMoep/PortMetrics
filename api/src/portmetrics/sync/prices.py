@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from portmetrics.assets.identifiers import preferred_symbol_map
 from portmetrics.db.models import PriceSnapshot, SyncState
 from portmetrics.ghostfolio.client import GhostfolioActivity, GhostfolioClient, GhostfolioError
 
@@ -43,8 +44,14 @@ def discover_assets(
     activities: list[GhostfolioActivity],
     *,
     default_data_source: str = "YAHOO",
+    preferred_by_isin: dict[str, str] | None = None,
 ) -> list[AssetRef]:
-    """Unique Ghostfolio assets from activity SymbolProfiles."""
+    """Unique Ghostfolio assets from activity SymbolProfiles.
+
+    When ``preferred_by_isin`` is set, quote requests use the mapped symbol for
+    that ISIN (stable listing) instead of whichever activity was seen last.
+    """
+    preferred = preferred_by_isin or {}
     found: dict[tuple[str, str], AssetRef] = {}
     for activity in activities:
         symbol = (activity.symbol or "").strip()
@@ -52,6 +59,8 @@ def discover_assets(
             continue
         data_source = (activity.data_source or default_data_source).strip() or default_data_source
         key = asset_key_for_ref(isin=activity.isin, symbol=symbol)
+        if activity.isin and activity.isin in preferred:
+            symbol = preferred[activity.isin]
         found[(data_source, key)] = AssetRef(
             data_source=data_source,
             symbol=symbol,
@@ -145,7 +154,11 @@ def sync_ghostfolio_prices(
 ) -> PriceSyncResult:
     """Pull daily closes from Ghostfolio symbol API into price_snapshots."""
     fetched = activities if activities is not None else client.list_activities()
-    assets = discover_assets(fetched, default_data_source=default_data_source)
+    assets = discover_assets(
+        fetched,
+        default_data_source=default_data_source,
+        preferred_by_isin=preferred_symbol_map(session),
+    )
     day = as_of or datetime.now(UTC).date()
     upserted = 0
     skipped = 0

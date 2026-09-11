@@ -1,6 +1,6 @@
 /** Pure display / nav / sort helpers used by the SPA (unit-tested). */
 
-export type SettingsSection = "ops" | "portfolio" | "paperless" | "ghostfolio";
+export type SettingsSection = "ops" | "portfolio" | "paperless" | "ghostfolio" | "assets";
 export type SortDir = "asc" | "desc";
 export type SortState = { key: string; dir: SortDir };
 
@@ -9,6 +9,7 @@ export type IdName = { id: number; name: string };
 export const SETTINGS_SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "ops", label: "Wartung" },
   { id: "portfolio", label: "Portfolio" },
+  { id: "assets", label: "Assets" },
   { id: "paperless", label: "Paperless" },
   { id: "ghostfolio", label: "Ghostfolio" },
 ];

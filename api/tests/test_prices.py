@@ -17,6 +17,28 @@ from portmetrics.sync.prices import (
 )
 
 
+def test_discover_assets_prefers_mapped_symbol(sample_activity_payload: dict) -> None:
+    a = GhostfolioActivity.from_api(sample_activity_payload)
+    other = GhostfolioActivity.from_api(
+        {
+            **sample_activity_payload,
+            "id": str(UUID(int=3)),
+            "SymbolProfile": {
+                "symbol": "VWRD.L",
+                "isin": "IE00BK5BQT80",
+                "dataSource": "YAHOO",
+            },
+        }
+    )
+    assets = discover_assets(
+        [a, other],
+        preferred_by_isin={"IE00BK5BQT80": "VGWL.DE"},
+    )
+    assert len(assets) == 1
+    assert assets[0].symbol == "VGWL.DE"
+    assert assets[0].asset_key == "IE00BK5BQT80"
+
+
 def test_discover_assets_uses_isin_or_symbol(sample_activity_payload: dict) -> None:
     with_isin = GhostfolioActivity.from_api(sample_activity_payload)
     no_isin_payload = {

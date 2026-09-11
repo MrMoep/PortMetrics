@@ -3,12 +3,14 @@
 ## [Unreleased]
 
 ### Features
+- Kennungs-Tabelle ISIN/WKN/preferred Symbol (Einstellungen → Assets); Paperless-Confirm blockiert ohne Mapping; Historien-Vorschlag + Staging-Deep-Link (#57)
 - Ghostfolio-Sync **Orphan-Prune**: lokal fehlende GF-Activities werden entfernt; Staging `imported` → `pending`; Statuszeile zeigt gelöschte Anzahl
 
 ### Changed
 - Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`
-- Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Symbol = ISIN
+- Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Ghostfolio-Import-Symbol = preferred_symbol (nicht roh ISIN)
 - Typ `OTHER` im Staging sichtbar, Confirm gesperrt; kein Paperless-Write-back für Import-Status/Activity-ID
+- Price-Sync nutzt preferred_symbol aus der Kennungs-Tabelle, wenn gesetzt
 
 ## [0.2.0] — 2026-09-09
 

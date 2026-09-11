@@ -52,7 +52,7 @@ Felder werden **in Paperless** angelegt (beliebige Namen). In PortMetrics unter 
 
 | W?hrung | aus Monetary-Wert von Kurs/Entgelte |
 
-| Symbol / Ticker | entf?llt ? Symbol = ISIN |
+| Symbol / Ticker | Confirm nutzt `preferred_symbol` aus Kennungs-Tabelle (`asset_identifiers`) |
 
 | Import-Status / Activity-ID | lokal in Staging / `document_links` (kein Paperless-Write-back) |
 
@@ -194,6 +194,6 @@ GHOSTFOLIO_DATA_SOURCE=YAHOO
 
 
 
-`PAPERLESS_URL` / `PAPERLESS_TOKEN` / `PAPERLESS_WEBHOOK_SECRET` bleiben Env. Tag, Field-Map, ?ffentliche Web-URL (`public_url` f?r Doc-Links; Fallback `PAPERLESS_URL`) und Ghostfolio-Defaults k?nnen in der UI ?berschrieben und in `app_settings` persistiert werden. Dokumente mit ISIN+WKN f?llen `asset_identifiers` (Anzeige in FIFO Lots / Positionen).
+`PAPERLESS_URL` / `PAPERLESS_TOKEN` / `PAPERLESS_WEBHOOK_SECRET` bleiben Env. Tag, Field-Map, öffentliche Web-URL (`public_url` für Doc-Links; Fallback `PAPERLESS_URL`) und Ghostfolio-Defaults können in der UI überschrieben und in `app_settings` persistiert werden. Dokumente mit ISIN+WKN füllen `asset_identifiers` (WKN nur wenn Tabellen-Zelle leer); preferred Symbol wird manuell bzw. per Staging-Vorschlag gesetzt.
 
 

@@ -13,7 +13,16 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from portmetrics.assets.identifiers import backfill_from_staging, upsert_from_payload
+from portmetrics.assets.identifiers import (
+    SETTINGS_ASSETS_HASH,
+    backfill_from_staging,
+    get_identifier,
+    normalize_isin,
+    normalize_symbol,
+    staging_mapping_status,
+    upsert_from_payload,
+    wkn_conflict,
+)
 from portmetrics.db.models import Activity, DocumentLink, Lot, StagingImport
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.paperless.client import PaperlessClient
@@ -431,13 +440,21 @@ def list_staging(
             StagingImport.status.notin_([STATUS_IMPORTED, STATUS_REJECTED])
         )
     rows = session.scalars(stmt).all()
-    return [_serialize_staging(row) for row in rows]
+    return [_serialize_staging(session, row) for row in rows]
 
 
-def _serialize_staging(row: StagingImport) -> dict[str, Any]:
+def _serialize_staging(session: Session, row: StagingImport) -> dict[str, Any]:
     payload = dict(row.payload or {})
     wp_typ = str(payload.get("wp_typ") or "").upper()
     payload.setdefault("importable", wp_typ in IMPORTABLE_TYPES)
+    mapping = staging_mapping_status(session, payload)
+    importable = bool(payload.get("importable"))
+    can_confirm = (
+        importable
+        and row.status not in {STATUS_IMPORTED, STATUS_REJECTED}
+        and (not mapping["needs_mapping"])
+        and mapping["wkn_conflict"] is None
+    )
     return {
         "id": row.id,
         "paperless_doc_id": row.paperless_doc_id,
@@ -447,6 +464,8 @@ def _serialize_staging(row: StagingImport) -> dict[str, Any]:
         "error": row.error,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "mapping": mapping,
+        "can_confirm": can_confirm,
     }
 
 
@@ -457,7 +476,7 @@ def reject_staging(session: Session, staging_id: int) -> dict[str, Any]:
     row.status = STATUS_REJECTED
     row.error = None
     session.flush()
-    return _serialize_staging(row)
+    return _serialize_staging(session, row)
 
 
 def confirm_staging(
@@ -472,7 +491,7 @@ def confirm_staging(
     if row is None:
         raise LookupError(f"staging import {staging_id} not found")
     if row.status == STATUS_IMPORTED:
-        return _serialize_staging(row)
+        return _serialize_staging(session, row)
 
     paperless_settings = get_paperless_settings(session)
     payload = dict(row.payload or {})
@@ -483,6 +502,25 @@ def confirm_staging(
             f"Cannot import type {wp_typ or 'UNKNOWN'} — "
             "set Typ to BUY/SELL/DIVIDEND/FEE/INTEREST in Paperless and re-sync"
         )
+
+    isin = normalize_isin(payload.get("isin"))
+    identifier = get_identifier(session, isin) if isin else None
+    conflict = wkn_conflict(
+        table_wkn=identifier.wkn if identifier else None,
+        observed_wkn=payload.get("wkn"),
+    )
+    if conflict is not None:
+        raise ValueError(conflict.message)
+
+    preferred = normalize_symbol(identifier.preferred_symbol) if identifier else None
+    if isin and not preferred:
+        raise ValueError(
+            "Kein preferred Symbol in der Kennungs-Tabelle für diese ISIN. "
+            f"Mapping anlegen: {SETTINGS_ASSETS_HASH}"
+        )
+    import_symbol = preferred or str(payload.get("symbol") or "").strip()
+    if not import_symbol:
+        raise ValueError("Missing symbol for Ghostfolio import")
 
     resolved_account = (
         account_id
@@ -495,7 +533,7 @@ def confirm_staging(
         "date": f"{payload['trade_date']}T00:00:00.000Z",
         "fee": float(payload["fee"]),
         "quantity": float(payload["quantity"]),
-        "symbol": payload["symbol"],
+        "symbol": import_symbol,
         "type": payload["wp_typ"],
         "unitPrice": float(payload["unit_price"]),
         "comment": f"paperless:{row.paperless_doc_id}",
@@ -537,7 +575,7 @@ def confirm_staging(
         )
 
     session.flush()
-    return _serialize_staging(row)
+    return _serialize_staging(session, row)
 
 
 def _extract_activity_id(imported: dict[str, Any]) -> UUID | None:
