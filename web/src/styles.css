@@ -586,6 +586,11 @@ th {
   max-width: 640px;
 }
 
+.form-assets {
+  max-width: none;
+  width: 100%;
+}
+
 .form-filters {
   max-width: 960px;
 }
@@ -629,6 +634,43 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.assets-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.assets-table th:nth-child(1),
+.assets-table td:nth-child(1) {
+  width: 28%;
+}
+
+.assets-table th:nth-child(2),
+.assets-table td:nth-child(2) {
+  width: 18%;
+}
+
+.assets-table th:nth-child(3),
+.assets-table td:nth-child(3) {
+  width: 36%;
+}
+
+.assets-table th:nth-child(4),
+.assets-table td:nth-child(4) {
+  width: 18%;
+  white-space: nowrap;
+}
+
+.assets-table td {
+  vertical-align: middle;
+}
+
+.assets-table input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .filter-fieldset {
