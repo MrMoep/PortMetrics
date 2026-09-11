@@ -768,6 +768,39 @@ export default function App() {
     }
   }
 
+  function openAssetsFromStaging(item: StagingItem) {
+    if (!confirmDiscard(settingsSection)) return;
+    const isin = (item.payload.isin || item.mapping?.isin || "").trim().toUpperCase();
+    const wkn = (item.payload.wkn || "").trim().toUpperCase() || null;
+    const suggested = item.mapping?.suggested_symbol?.trim() || null;
+    if (isin) {
+      setAssetDraft((prev) => {
+        const idx = prev.findIndex((row) => row.isin.trim().toUpperCase() === isin);
+        if (idx >= 0) {
+          const next = [...prev];
+          const row = { ...next[idx] };
+          if (!row.wkn && wkn) row.wkn = wkn;
+          if (!row.preferred_symbol && suggested) row.preferred_symbol = suggested;
+          if (row.paperless_doc_id == null) row.paperless_doc_id = item.paperless_doc_id;
+          next[idx] = row;
+          return next;
+        }
+        return [
+          ...prev,
+          {
+            isin,
+            wkn,
+            preferred_symbol: suggested,
+            paperless_doc_id: item.paperless_doc_id,
+          },
+        ];
+      });
+    }
+    setTab("settings");
+    setSettingsSection("assets");
+    writeSettingsHash("assets");
+  }
+
   async function onTestPaperless() {
     setError("");
     setStatus("Paperless testen…");
@@ -1341,12 +1374,7 @@ export default function App() {
                           <button
                             type="button"
                             className="linkish"
-                            onClick={() => {
-                              if (!confirmDiscard(settingsSection)) return;
-                              setTab("settings");
-                              setSettingsSection("assets");
-                              writeSettingsHash("assets");
-                            }}
+                            onClick={() => openAssetsFromStaging(item)}
                           >
                             Tabelle
                           </button>
@@ -1583,9 +1611,9 @@ export default function App() {
                 Import. Confirm ohne preferred Symbol ist gesperrt. Data Source bleibt global unter
                 Ghostfolio.
               </p>
-              <form className="form form-wide" onSubmit={(e) => void onSaveAssets(e)}>
+              <form className="form form-assets" onSubmit={(e) => void onSaveAssets(e)}>
                 <div className="table-wrap">
-                  <table>
+                  <table className="assets-table">
                     <thead>
                       <tr>
                         <th>ISIN</th>
