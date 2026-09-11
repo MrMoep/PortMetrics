@@ -199,6 +199,7 @@ export type StagingSyncEvent = {
   scanned?: number;
   upserted?: number;
   skipped?: number;
+  skip_reasons?: Record<string, number>;
   mode?: string;
   filters_active?: boolean;
   warning?: string | null;

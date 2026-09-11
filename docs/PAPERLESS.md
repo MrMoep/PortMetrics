@@ -144,9 +144,9 @@ Unvollst?ndige Felder werden ?bersprungen (`action=skipped`); manueller Sync ble
 
 | `GET` | `/api/staging?status=all` | Alle inkl. imported/rejected |
 
-| `POST` | `/api/staging/sync?mode=partial` | Teilsync <=100 (JSON) |
+| `POST` | `/api/staging/sync?mode=partial` | Teilsync ≤100 (JSON; `skip_reasons`) |
 
-| `POST` | `/api/staging/sync?mode=full` | Full Sync, NDJSON-Progress |
+| `POST` | `/api/staging/sync?mode=full` | Full Sync, NDJSON-Progress (`skip_reasons` im `done`) |
 
 | `POST` | `/api/staging/match-activities` | Manuell: Staging an bestehende Activities |
 

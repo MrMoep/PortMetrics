@@ -349,6 +349,7 @@ def staging_sync(
             "scanned": result.scanned,
             "upserted": result.upserted,
             "skipped": result.skipped,
+            "skip_reasons": result.skip_reasons,
             "mode": result.mode,
             "filters_active": result.filters_active,
         }
@@ -380,6 +381,7 @@ def staging_sync(
                         "scanned": result.scanned,
                         "upserted": result.upserted,
                         "skipped": result.skipped,
+                        "skip_reasons": result.skip_reasons,
                         "mode": result.mode,
                         "filters_active": result.filters_active,
                         "warning": (

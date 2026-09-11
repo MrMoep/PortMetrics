@@ -344,7 +344,18 @@ const OPS_ACTIONS: {
     label: "Teilsync Paperless",
     hint: "Neueste ≤100 Belege pullen (Catch-up; Filter optional).",
     icon: "paperless",
-    run: () => api.stagingSync("partial"),
+    run: async () => {
+      const done = await api.stagingSync("partial");
+      const reasons = done.skip_reasons
+        ? Object.entries(done.skip_reasons)
+            .map(([reason, count]) => `${reason}×${count}`)
+            .join(", ")
+        : "";
+      return (
+        `Teilsync OK · scanned ${done.scanned ?? 0}, upserted ${done.upserted ?? 0}, skipped ${done.skipped ?? 0}` +
+        (reasons ? ` · ${reasons}` : "")
+      );
+    },
   },
 ];
 
@@ -879,8 +890,14 @@ export default function App() {
         }
       });
       await refresh();
+      const reasons = done.skip_reasons
+        ? Object.entries(done.skip_reasons)
+            .map(([reason, count]) => `${reason}×${count}`)
+            .join(", ")
+        : "";
       setStatus(
-        `${mode === "full" ? "Full Sync" : "Teilsync"} OK · scanned ${done.scanned ?? 0}, upserted ${done.upserted ?? 0}, skipped ${done.skipped ?? 0}`,
+        `${mode === "full" ? "Full Sync" : "Teilsync"} OK · scanned ${done.scanned ?? 0}, upserted ${done.upserted ?? 0}, skipped ${done.skipped ?? 0}` +
+          (reasons ? ` · ${reasons}` : ""),
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -38,6 +40,8 @@ from portmetrics.paperless.mapping import (
     sync_filter_ids,
 )
 
+logger = logging.getLogger(__name__)
+
 PAPERLESS_SOURCE = "paperless"
 STATUS_PENDING = "pending"
 STATUS_IMPORTED = "imported"
@@ -63,6 +67,7 @@ class StagingSyncResult:
     skipped: int
     mode: str = "partial"
     filters_active: bool = False
+    skip_reasons: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,19 @@ class DocumentIngestResult:
     action: str  # upserted | skipped | error
     reason: str | None = None
     staging_id: int | None = None
+
+
+def _coerce_wp_typ(value: Any) -> str:
+    """Normalize Paperless type (string or select {label/id}) to BUY/SELL/…"""
+    if value is None or value == "":
+        return "BUY"
+    if isinstance(value, dict):
+        for key in ("label", "value", "name"):
+            raw = value.get(key)
+            if raw is not None and str(raw).strip():
+                return str(raw).strip().upper()
+        return "BUY"
+    return str(value).strip().upper()
 
 
 SYNC_MODE_PARTIAL = "partial"
@@ -154,7 +172,7 @@ def build_staging_payload(
 ) -> dict[str, Any]:
     """Build staging payload from role-keyed fields (or legacy name-keyed)."""
     roles = _normalize_to_roles(fields)
-    wp_typ = (roles.get("type") or "BUY").strip().upper()
+    wp_typ = _coerce_wp_typ(roles.get("type"))
     if wp_typ not in STAGING_TYPES:
         raise ValueError(f"Unsupported wp_typ: {wp_typ}")
 
@@ -262,13 +280,14 @@ def _upsert_document_from_fields(
         return DocumentIngestResult(doc_id, "skipped", "already imported in Paperless")
 
     roles = _normalize_to_roles(fields)
-    wp_typ = (str(roles.get("type") or "BUY")).strip().upper()
-    if wp_typ != "OTHER" and not roles.get("isin") and not roles.get("symbol"):
+    wp_typ = _coerce_wp_typ(roles.get("type"))
+    has_id = bool(roles.get("isin") or roles.get("symbol") or roles.get("wkn"))
+    if wp_typ != "OTHER" and not has_id:
         return DocumentIngestResult(doc_id, "skipped", "missing isin")
 
     try:
         payload = build_staging_payload(document, fields)
-    except ValueError as exc:
+    except (ValueError, TypeError, AttributeError) as exc:
         return DocumentIngestResult(doc_id, "skipped", str(exc))
 
     upsert_from_payload(session, payload)
@@ -335,6 +354,7 @@ def sync_paperless_documents(
     )
     upserted = 0
     skipped = 0
+    reason_counts: Counter[str] = Counter()
     for index, document in enumerate(documents, start=1):
         fields = extract_fields_by_roles(document, role_map)
         result = _upsert_document_from_fields(session, document, fields)
@@ -342,6 +362,7 @@ def sync_paperless_documents(
             upserted += 1
         else:
             skipped += 1
+            reason_counts[result.reason or "unknown"] += 1
         if on_progress and (index % 10 == 0 or index == len(documents)):
             on_progress(
                 {
@@ -354,12 +375,24 @@ def sync_paperless_documents(
             )
     session.flush()
     backfill_from_staging(session)
+    skip_reasons = dict(reason_counts.most_common())
+    if skipped:
+        summary = ", ".join(f"{reason}={count}" for reason, count in skip_reasons.items())
+        logger.info(
+            "paperless sync %s: scanned=%s upserted=%s skipped=%s (%s)",
+            resolved_mode,
+            len(documents),
+            upserted,
+            skipped,
+            summary,
+        )
     return StagingSyncResult(
         scanned=len(documents),
         upserted=upserted,
         skipped=skipped,
         mode=resolved_mode,
         filters_active=filters_active or has_sync_filters(paperless_settings),
+        skip_reasons=skip_reasons,
     )
 
 

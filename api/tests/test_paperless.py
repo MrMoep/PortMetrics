@@ -296,6 +296,7 @@ def test_sync_full_mode_paginates_with_progress(db_session) -> None:
     assert result.scanned == 3
     assert result.upserted == 3
     assert result.filters_active is True
+    assert result.skip_reasons == {}
     assert pages["n"] == 2
     assert any(e.get("event") == "page" for e in events)
     assert any(e.get("event") == "ingest" for e in events)
@@ -674,3 +675,48 @@ def test_reingest_skips_imported_and_rejected(db_session) -> None:
     assert {item["paperless_doc_id"] for item in all_items} == {10, 11, 12}
     assert {item["paperless_doc_id"] for item in open_items} == {12}
     assert {item["paperless_doc_id"] for item in pending_items} == {12}
+
+
+def test_sync_aggregates_skip_reasons(db_session) -> None:
+    imported = StagingImport(
+        paperless_doc_id=10,
+        payload=build_staging_payload(_doc(10), extract_custom_fields(_doc(10), FIELD_MAP)),
+        status=STATUS_IMPORTED,
+    )
+    db_session.add(imported)
+    db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        handled = _fields_handler(request)
+        if handled:
+            return handled
+        if request.url.path.endswith("/documents/"):
+            bare = _doc(20, custom_fields=[{"field": 1, "value": "BUY"}])
+            select_typ = _doc(
+                21,
+                custom_fields=[
+                    {"field": 1, "value": {"id": "buy", "label": "BUY"}},
+                    {"field": 2, "value": "IE00BK5BQT80"},
+                    {"field": 3, "value": "A1JX52"},
+                    {"field": 4, "value": "10"},
+                    {"field": 5, "value": "EUR100.50"},
+                    {"field": 6, "value": "EUR1.50"},
+                ],
+            )
+            return httpx.Response(200, json={"results": [_doc(10), bare, select_typ]})
+        raise AssertionError(request.url.path)
+
+    client = PaperlessClient(
+        "http://paperless.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = sync_paperless_documents(db_session, client)
+    assert result.scanned == 3
+    assert result.upserted == 1
+    assert result.skipped == 2
+    assert result.skip_reasons["already imported locally"] == 1
+    assert result.skip_reasons["missing isin"] == 1
+    row = db_session.scalar(select(StagingImport).where(StagingImport.paperless_doc_id == 21))
+    assert row is not None
+    assert row.payload["wp_typ"] == "BUY"
