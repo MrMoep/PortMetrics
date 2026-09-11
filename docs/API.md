@@ -18,7 +18,7 @@ Basis-URL im Container: `http://host:8080`
 | `POST` | `/api/metrics/rebuild` | `metrics_daily` neu |
 | `GET` | `/api/positions` | Einfache Positionsrendite |
 | `GET` | `/api/staging` | Paperless-Review-Queue |
-| `POST` | `/api/staging/sync` | Paperless → Staging |
+| `POST` | `/api/staging/sync` | Paperless → Staging (`skip_reasons` bei skips) |
 | `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio + stiller Mirror (best-effort) |
 | `POST` | `/api/staging/{id}/reject` | Staging ablehnen |
 | `POST` | `/api/webhooks/paperless` | Paperless Auto-Ingest (Shared Secret) |
