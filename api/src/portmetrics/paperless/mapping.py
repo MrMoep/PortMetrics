@@ -245,9 +245,77 @@ def resolve_role_field_map(
     return resolved
 
 
+def select_option_map(field: dict[str, Any]) -> dict[str, str]:
+    """Build option-id → label for a Paperless select custom field."""
+    if str(field.get("data_type") or "").lower() != "select":
+        return {}
+    extra = field.get("extra_data") if isinstance(field.get("extra_data"), dict) else {}
+    options = (
+        (extra or {}).get("select_options")
+        or field.get("select_options")
+        or []
+    )
+    out: dict[str, str] = {}
+    if not isinstance(options, list):
+        return out
+    for opt in options:
+        if isinstance(opt, str):
+            label = opt.strip()
+            if label:
+                out[label] = label
+            continue
+        if not isinstance(opt, dict):
+            continue
+        label_raw = opt.get("label") or opt.get("name") or opt.get("value")
+        if label_raw is None or str(label_raw).strip() == "":
+            continue
+        label = str(label_raw).strip()
+        oid = opt.get("id")
+        if oid is not None and str(oid).strip() != "":
+            out[str(oid).strip()] = label
+        out[label] = label
+    return out
+
+
+def select_option_maps_by_field_id(fields: list[dict[str, Any]]) -> dict[int, dict[str, str]]:
+    """field_id → {option_id_or_label: label} for all select custom fields."""
+    maps: dict[int, dict[str, str]] = {}
+    for field in fields:
+        field_id = field.get("id")
+        if field_id is None:
+            continue
+        option_map = select_option_map(field)
+        if option_map:
+            maps[int(field_id)] = option_map
+    return maps
+
+
+def resolve_select_value(value: Any, id_to_label: dict[str, str] | None) -> Any:
+    """Replace select option ids with labels when a map is available."""
+    if not id_to_label:
+        return value
+    if isinstance(value, dict):
+        for key in ("label", "value", "name"):
+            raw = value.get(key)
+            if raw is not None and str(raw).strip():
+                text = str(raw).strip()
+                return id_to_label.get(text, text)
+        oid = value.get("id")
+        if oid is not None and str(oid).strip() != "":
+            key = str(oid).strip()
+            return id_to_label.get(key, key)
+        return value
+    if value is None or value == "":
+        return value
+    key = str(value).strip()
+    return id_to_label.get(key, value)
+
+
 def extract_fields_by_roles(
     document: dict[str, Any],
     role_to_field_id: dict[str, int],
+    *,
+    select_maps: dict[int, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Map document custom_fields → {role: value}."""
     id_to_role = {field_id: role for role, field_id in role_to_field_id.items()}
@@ -256,9 +324,13 @@ def extract_fields_by_roles(
         field_id = item.get("field")
         if field_id is None:
             continue
-        role = id_to_role.get(int(field_id))
+        fid = int(field_id)
+        role = id_to_role.get(fid)
         if role:
-            result[role] = item.get("value")
+            value = item.get("value")
+            if select_maps:
+                value = resolve_select_value(value, select_maps.get(fid))
+            result[role] = value
     return result
 
 

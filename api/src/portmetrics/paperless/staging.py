@@ -37,6 +37,7 @@ from portmetrics.paperless.mapping import (
     get_paperless_settings,
     has_sync_filters,
     resolve_role_field_map,
+    select_option_maps_by_field_id,
     sync_filter_ids,
 )
 
@@ -329,6 +330,7 @@ def sync_paperless_documents(
 
     role_map = resolve_role_field_map(session, client)
     ensure_required_roles(role_map)
+    select_maps = select_option_maps_by_field_id(client.list_custom_fields())
     paperless_settings = get_paperless_settings(session)
     tag_ids, type_ids = sync_filter_ids(paperless_settings)
     legacy_tag = tag if tag is not None else paperless_settings.get("tag")
@@ -356,7 +358,7 @@ def sync_paperless_documents(
     skipped = 0
     reason_counts: Counter[str] = Counter()
     for index, document in enumerate(documents, start=1):
-        fields = extract_fields_by_roles(document, role_map)
+        fields = extract_fields_by_roles(document, role_map, select_maps=select_maps)
         result = _upsert_document_from_fields(session, document, fields)
         if result.action == "upserted":
             upserted += 1
@@ -404,8 +406,9 @@ def ingest_paperless_document(
     """Fetch one Paperless document and upsert into staging_imports."""
     role_map = resolve_role_field_map(session, client)
     ensure_required_roles(role_map)
+    select_maps = select_option_maps_by_field_id(client.list_custom_fields())
     document = client.get_document(document_id)
-    fields = extract_fields_by_roles(document, role_map)
+    fields = extract_fields_by_roles(document, role_map, select_maps=select_maps)
     result = _upsert_document_from_fields(session, document, fields)
     session.flush()
     return result

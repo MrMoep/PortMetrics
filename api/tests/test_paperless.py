@@ -68,10 +68,20 @@ def _doc(doc_id: int = 42, **overrides) -> dict:
 
 def _fields_handler(request: httpx.Request) -> httpx.Response | None:
     if request.url.path.endswith("/custom_fields/"):
-        return httpx.Response(
-            200,
-            json={"results": [{"id": fid, "name": name} for name, fid in FIELD_MAP.items()]},
-        )
+        results = []
+        for name, fid in FIELD_MAP.items():
+            item: dict = {"id": fid, "name": name, "data_type": "string"}
+            if name == "wp_typ":
+                item["data_type"] = "select"
+                item["extra_data"] = {
+                    "select_options": [
+                        {"id": "SXXGAXZIVEH4OXSZ", "label": "BUY"},
+                        {"id": "J6QQIILJAHMITXKE", "label": "SELL"},
+                        {"id": "7AMU4HWVPJEVCFUK", "label": "DIVIDEND"},
+                    ]
+                }
+            results.append(item)
+        return httpx.Response(200, json={"results": results})
     return None
 
 
@@ -86,6 +96,45 @@ def test_extract_fields_by_roles() -> None:
     assert fields["isin"] == "IE00BK5BQT80"
     assert fields["quantity"] == "10"
     assert fields["wkn"] == "A1JX52"
+
+
+def test_select_option_id_resolves_to_label() -> None:
+    from portmetrics.paperless.mapping import (
+        resolve_select_value,
+        select_option_map,
+        select_option_maps_by_field_id,
+    )
+
+    field = {
+        "id": 17,
+        "name": "Typ",
+        "data_type": "select",
+        "extra_data": {
+            "select_options": [
+                {"id": "SXXGAXZIVEH4OXSZ", "label": "BUY"},
+                {"id": "J6QQIILJAHMITXKE", "label": "SELL"},
+            ]
+        },
+    }
+    option_map = select_option_map(field)
+    assert option_map["SXXGAXZIVEH4OXSZ"] == "BUY"
+    assert resolve_select_value("SXXGAXZIVEH4OXSZ", option_map) == "BUY"
+    assert resolve_select_value({"id": "J6QQIILJAHMITXKE"}, option_map) == "SELL"
+
+    maps = select_option_maps_by_field_id([field])
+    doc = _doc(
+        99,
+        custom_fields=[
+            {"field": 17, "value": "SXXGAXZIVEH4OXSZ"},
+            {"field": 2, "value": "IE00BK5BQT80"},
+            {"field": 4, "value": "1"},
+            {"field": 5, "value": "EUR10"},
+        ],
+    )
+    roles = extract_fields_by_roles(doc, {"type": 17, "isin": 2, "quantity": 4, "unit_price": 5}, select_maps=maps)
+    assert roles["type"] == "BUY"
+    payload = build_staging_payload(doc, roles)
+    assert payload["wp_typ"] == "BUY"
 
 
 def test_parse_monetary() -> None:
@@ -695,7 +744,7 @@ def test_sync_aggregates_skip_reasons(db_session) -> None:
             select_typ = _doc(
                 21,
                 custom_fields=[
-                    {"field": 1, "value": {"id": "buy", "label": "BUY"}},
+                    {"field": 1, "value": "SXXGAXZIVEH4OXSZ"},
                     {"field": 2, "value": "IE00BK5BQT80"},
                     {"field": 3, "value": "A1JX52"},
                     {"field": 4, "value": "10"},
