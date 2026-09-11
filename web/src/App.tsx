@@ -157,6 +157,10 @@ const METRIC_HINTS: Record<string, string> = {
   sharpe: "Überrendite je Einheit Risiko (vs. risikofreiem Zinssatz).",
   tax: "Verbleibender steuerlicher Freibetrag im laufenden Jahr.",
   dividends: "Summe erhaltener Dividenden über den betrachteten Zeitraum.",
+  yearClose:
+    "Kalenderjahr-Rendite: Jahresanfang (bzw. erster Trade) bis Jahresschluss — bei YTD bis heute.",
+  yearToDate:
+    "Gleiches Startdatum wie die Jahreszeile, Ende immer der aktuelle Kurs (as-of).",
 };
 
 function SortHeader({
@@ -1112,6 +1116,39 @@ export default function App() {
                         <td className="mono">{cf.date}</td>
                         <td className={`mono ${signedClass(cf.amount, showMode)}`}>
                           {money(cf.amount, showMode)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          ) : null}
+          {overview.annual_returns && overview.annual_returns.length > 0 ? (
+            <Panel
+              label="Jahres-Rendite"
+              meta={`${overview.annual_returns.length} JAHRE`}
+              className="pane-trail"
+              offset
+            >
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Jahr</th>
+                      <th title={METRIC_HINTS.yearClose}>Abschluss</th>
+                      <th title={METRIC_HINTS.yearToDate}>Bis heute</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.annual_returns.map((row) => (
+                      <tr key={row.label}>
+                        <td className="mono">{row.label}</td>
+                        <td className={`mono ${signedClass(row.year_return, showMode)}`}>
+                          {pct(row.year_return, showMode)}
+                        </td>
+                        <td className={`mono ${signedClass(row.return_to_date, showMode)}`}>
+                          {row.return_to_date == null ? "—" : pct(row.return_to_date, showMode)}
                         </td>
                       </tr>
                     ))}

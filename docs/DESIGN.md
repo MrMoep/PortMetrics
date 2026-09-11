@@ -79,7 +79,7 @@ Hintergrund zusätzlich: **24px-Raster** über halbtransparente Linien (`--grid-
 
 | Screen | Struktur |
 |--------|----------|
-| Overview | Workspace: Kennzahlen (Hero-NAV, Tooltips) + Perioden-Tabelle (oben bündig); sortierbare Cashflow-/Lots-/Positions-Tabellen |
+| Overview | Workspace: Kennzahlen + Perioden (oben); Cashflow-Timeline + Jahres-Rendite (unten, Jahresreihe mit Abschluss / Bis heute) |
 | FIFO Lots / Positionen / Staging | Einzelpanel + dichte Tabelle |
 | Simulator | Split: Formular \| Ergebnispanel |
 | Settings | Subnav (Wartung · Portfolio · Assets · Paperless · Ghostfolio) + ein Panel; Deep-Links `#settings/ops` usw. |

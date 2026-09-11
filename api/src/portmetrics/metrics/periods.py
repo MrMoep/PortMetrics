@@ -25,6 +25,17 @@ class PeriodReturn:
     period_return: Decimal | None
 
 
+@dataclass(frozen=True)
+class AnnualReturn:
+    """Calendar-year return plus open-ended return from the same start to as-of."""
+
+    label: str
+    start_date: date
+    end_date: date
+    year_return: Decimal | None
+    return_to_date: Decimal | None
+
+
 def _d(value: Decimal | int | str | None) -> Decimal:
     if value is None:
         return ZERO
@@ -188,6 +199,71 @@ def compute_standard_periods(
         period_return(activities, prices, label=label, start=start, end=end_date)
         for label, start, end_date in periods
     ]
+
+
+def compute_annual_returns(
+    activities: list[Activity],
+    prices: dict[tuple[str, date], Decimal],
+    as_of: date | None = None,
+) -> list[AnnualReturn]:
+    """YTD then prior calendar years back to the first activity.
+
+    ``year_return`` closes at year-end (or as-of for YTD).
+    ``return_to_date`` uses the same start but ends at as-of; omitted for YTD
+    because both windows are identical.
+    """
+    if not activities:
+        return []
+    end = as_of or date.today()
+    first = activities[0].trade_date
+    rows: list[AnnualReturn] = []
+    for year in range(end.year, first.year - 1, -1):
+        start = max(first, date(year, 1, 1))
+        if year == end.year:
+            closed = period_return(
+                activities, prices, label="ytd", start=start, end=end
+            )
+            rows.append(
+                AnnualReturn(
+                    label="ytd",
+                    start_date=closed.start_date,
+                    end_date=closed.end_date,
+                    year_return=closed.period_return,
+                    return_to_date=None,
+                )
+            )
+            continue
+        year_end = date(year, 12, 31)
+        if year_end < first:
+            continue
+        closed = period_return(
+            activities, prices, label=str(year), start=start, end=year_end
+        )
+        open_ended = period_return(
+            activities, prices, label=f"{year}_to_date", start=start, end=end
+        )
+        rows.append(
+            AnnualReturn(
+                label=str(year),
+                start_date=closed.start_date,
+                end_date=closed.end_date,
+                year_return=closed.period_return,
+                return_to_date=open_ended.period_return,
+            )
+        )
+    return rows
+
+
+def _annual_return_dict(row: AnnualReturn) -> dict:
+    return {
+        "label": row.label,
+        "start_date": row.start_date.isoformat(),
+        "end_date": row.end_date.isoformat(),
+        "year_return": str(row.year_return) if row.year_return is not None else None,
+        "return_to_date": (
+            str(row.return_to_date) if row.return_to_date is not None else None
+        ),
+    }
 
 
 def cagr(
@@ -383,6 +459,7 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
     prices = price_map(session)
     end = as_of or date.today()
     periods = compute_standard_periods(activities, prices, as_of=end)
+    annual = compute_annual_returns(activities, prices, as_of=end)
     nav = nav_as_of(activities, prices, end) if activities else ZERO
     contrib, withdr = (
         cashflows_between(activities, activities[0].trade_date, end) if activities else (ZERO, ZERO)
@@ -416,6 +493,7 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
             }
             for p in periods
         ],
+        "annual_returns": [_annual_return_dict(row) for row in annual],
         "cagr": cagr(activities, prices, end=end),
         "mwr": mwr,
         "cashflows": cashflow_timeline(activities),

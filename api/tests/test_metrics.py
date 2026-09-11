@@ -122,6 +122,37 @@ def test_standard_periods_and_cagr_smoke() -> None:
     assert result["cagr"] is not None
 
 
+def test_annual_returns_ytd_and_prior_years() -> None:
+    from portmetrics.metrics.periods import compute_annual_returns
+
+    a = _act(day=date(2024, 6, 1), typ="BUY", qty="10", price="100")
+    a.id = 1
+    activities = [a]
+    prices = {
+        ("IE00", date(2024, 6, 1)): Decimal("100"),
+        ("IE00", date(2024, 12, 31)): Decimal("110"),
+        ("IE00", date(2025, 12, 31)): Decimal("120"),
+        ("IE00", date(2026, 6, 1)): Decimal("130"),
+    }
+    rows = compute_annual_returns(activities, prices, as_of=date(2026, 6, 1))
+    assert [r.label for r in rows] == ["ytd", "2025", "2024"]
+    ytd = rows[0]
+    assert ytd.start_date == date(2026, 1, 1)
+    assert ytd.end_date == date(2026, 6, 1)
+    assert ytd.return_to_date is None
+    assert ytd.year_return is not None
+    closed_2025 = rows[1]
+    assert closed_2025.start_date == date(2025, 1, 1)
+    assert closed_2025.end_date == date(2025, 12, 31)
+    assert closed_2025.year_return is not None
+    assert closed_2025.return_to_date is not None
+    # Open-ended window continues past year-end → different (usually higher) return
+    assert closed_2025.return_to_date != closed_2025.year_return
+    first_year = rows[2]
+    assert first_year.start_date == date(2024, 6, 1)
+    assert first_year.end_date == date(2024, 12, 31)
+
+
 def test_overview_payload_aggregates(db_session) -> None:
     db_session.add(
         Activity(
@@ -156,6 +187,9 @@ def test_overview_payload_aggregates(db_session) -> None:
     assert Decimal(payload["invested"]) == Decimal("1000")
     assert Decimal(payload["unrealized_gain"]) == Decimal("100")
     assert len(payload["periods"]) > 0
+    assert len(payload["annual_returns"]) == 1
+    assert payload["annual_returns"][0]["label"] == "ytd"
+    assert payload["annual_returns"][0]["return_to_date"] is None
     assert payload["cagr"] is not None
     assert "irr" in payload["mwr"]
     assert "max_drawdown" in payload["risk"]
@@ -173,6 +207,7 @@ def test_overview_payload_empty(db_session) -> None:
     assert payload["invested"] == "0"
     assert payload["positions"] == []
     assert payload["cashflows"] == []
+    assert payload["annual_returns"] == []
 
 
 def test_rebuild_metrics_daily_persists_rows(db_session) -> None:
