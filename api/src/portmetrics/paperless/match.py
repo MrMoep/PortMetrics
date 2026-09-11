@@ -10,7 +10,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from portmetrics.assets.identifiers import looks_like_isin, normalize_isin, upsert_from_payload
+from portmetrics.assets.identifiers import (
+    IdentifierLookups,
+    load_identifier_lookups,
+    looks_like_isin,
+    normalize_isin,
+    normalize_wkn,
+    upsert_from_payload,
+)
 from portmetrics.db.models import Activity, DocumentLink, Lot, StagingImport
 from portmetrics.paperless.client import PaperlessClient
 from portmetrics.paperless.mapping import (
@@ -65,6 +72,7 @@ class _DocCandidate:
     quantity: Decimal
     unit_price: Decimal | None
     payload: dict[str, Any]
+    wkn: str | None = None
 
 
 def _as_decimal(value: Any) -> Decimal | None:
@@ -92,15 +100,99 @@ def _as_date(value: Any) -> date | None:
         return None
 
 
-def _activity_isin_keys(activity: Activity) -> set[str]:
+def _token_keys(raw: str | None) -> set[str]:
+    if not raw:
+        return set()
+    text = str(raw).strip()
+    if not text:
+        return set()
+    normalized = normalize_isin(text)
+    if normalized and looks_like_isin(normalized):
+        return {normalized}
+    return {text.upper()}
+
+
+def _expand_identity_keys(keys: set[str], lookups: IdentifierLookups) -> set[str]:
+    """Bridge ISIN ↔ preferred_symbol ↔ WKN via asset_identifiers."""
+    if not keys:
+        return set()
+
+    symbol_to_isin = {
+        symbol.upper(): isin for symbol, isin in lookups.isin_by_symbol.items()
+    }
+    isin_to_symbols: dict[str, set[str]] = {}
+    for symbol, isin in lookups.isin_by_symbol.items():
+        isin_to_symbols.setdefault(isin, set()).add(symbol.upper())
+
+    wkn_to_isins: dict[str, set[str]] = {}
+    for isin, wkn in lookups.wkn_by_isin.items():
+        wkn_n = normalize_wkn(wkn)
+        if wkn_n:
+            wkn_to_isins.setdefault(wkn_n, set()).add(isin)
+    for symbol, wkn in lookups.wkn_by_symbol.items():
+        wkn_n = normalize_wkn(wkn)
+        isin = symbol_to_isin.get(symbol.upper())
+        if wkn_n and isin:
+            wkn_to_isins.setdefault(wkn_n, set()).add(isin)
+
+    out = set(keys)
+    for key in list(keys):
+        if looks_like_isin(key):
+            out.update(isin_to_symbols.get(key, ()))
+            wkn = normalize_wkn(lookups.wkn_by_isin.get(key))
+            if wkn:
+                out.add(wkn)
+            continue
+
+        mapped_isin = symbol_to_isin.get(key)
+        if mapped_isin:
+            out.add(mapped_isin)
+            out.update(isin_to_symbols.get(mapped_isin, ()))
+            wkn = normalize_wkn(lookups.wkn_by_isin.get(mapped_isin))
+            if wkn:
+                out.add(wkn)
+            continue
+
+        for mapped_isin in wkn_to_isins.get(key, ()):
+            out.add(mapped_isin)
+            out.update(isin_to_symbols.get(mapped_isin, ()))
+            wkn = normalize_wkn(lookups.wkn_by_isin.get(mapped_isin))
+            if wkn:
+                out.add(wkn)
+    return out
+
+
+def _activity_identity_keys(
+    activity: Activity, lookups: IdentifierLookups
+) -> set[str]:
     keys: set[str] = set()
     for raw in (activity.isin, activity.symbol):
-        normalized = normalize_isin(raw)
-        if normalized and looks_like_isin(normalized):
-            keys.add(normalized)
-        elif raw:
-            keys.add(str(raw).strip().upper())
-    return keys
+        keys |= _token_keys(raw)
+    return _expand_identity_keys(keys, lookups)
+
+
+def _doc_identity_keys(
+    isin: str,
+    lookups: IdentifierLookups,
+    *,
+    wkn: str | None = None,
+) -> set[str]:
+    keys = _token_keys(isin)
+    keys |= _token_keys(wkn)
+    return _expand_identity_keys(keys, lookups)
+
+
+def _identities_overlap(
+    doc_isin: str,
+    activity: Activity,
+    lookups: IdentifierLookups,
+    *,
+    doc_wkn: str | None = None,
+) -> bool:
+    return bool(
+        _doc_identity_keys(doc_isin, lookups, wkn=doc_wkn)
+        & _activity_identity_keys(activity, lookups)
+    )
 
 
 def _price_close(a: Decimal, b: Decimal) -> bool:
@@ -193,8 +285,9 @@ def _find_candidate_activities(
     wp_typ: str,
     unit_price: Decimal | None,
     linked_activity_ids: set[int],
+    lookups: IdentifierLookups,
+    wkn: str | None = None,
 ) -> list[Activity]:
-    isin_n = normalize_isin(isin) or isin.strip().upper()
     base: list[Activity] = []
     for activity in activities:
         if activity.id in linked_activity_ids:
@@ -205,7 +298,7 @@ def _find_candidate_activities(
             continue
         if Decimal(activity.quantity) != quantity:
             continue
-        if isin_n not in _activity_isin_keys(activity):
+        if not _identities_overlap(isin, activity, lookups, doc_wkn=wkn):
             continue
         base.append(activity)
 
@@ -216,15 +309,18 @@ def _find_candidate_activities(
     return priced if priced else base
 
 
-def _doc_matches_activity(doc: _DocCandidate, activity: Activity) -> bool:
+def _doc_matches_activity(
+    doc: _DocCandidate,
+    activity: Activity,
+    lookups: IdentifierLookups,
+) -> bool:
     if str(activity.type).upper() != doc.wp_typ:
         return False
     if activity.trade_date != doc.trade_date:
         return False
     if Decimal(activity.quantity) != doc.quantity:
         return False
-    isin_n = normalize_isin(doc.isin) or doc.isin.strip().upper()
-    if isin_n not in _activity_isin_keys(activity):
+    if not _identities_overlap(doc.isin, activity, lookups, doc_wkn=doc.wkn):
         return False
     return True
 
@@ -311,6 +407,7 @@ def _load_doc_candidates(
             continue
         wp_typ = str(payload.get("wp_typ") or "").strip().upper()
         isin = str(payload.get("isin") or payload.get("symbol") or "").strip()
+        wkn = str(payload.get("wkn") or "").strip() or None
         trade_date = _as_date(payload.get("trade_date"))
         quantity = _as_decimal(payload.get("quantity"))
         unit_price = _as_decimal(payload.get("unit_price"))
@@ -325,6 +422,7 @@ def _load_doc_candidates(
                 quantity=quantity,
                 unit_price=unit_price,
                 payload=payload,
+                wkn=wkn,
             )
         )
     return out
@@ -333,14 +431,16 @@ def _load_doc_candidates(
 def match_lots_to_documents(session: Session, client: PaperlessClient) -> MatchResult:
     """Link unlinked FIFO lots to filtered Paperless docs when the match is unique.
 
-    For each unlinked lot, find docs with same type + ISIN + date + quantity
-    (unit_price breaks ties). Only links when the lot has exactly one doc and that
-    doc has exactly one lot. Marks existing staging rows imported.
+    For each unlinked lot, find docs with same type + identity + date + quantity
+    (unit_price breaks ties). Identity bridges Paperless ISIN/WKN to Ghostfolio
+    symbols via asset_identifiers. Only links when the lot has exactly one doc and
+    that doc has exactly one lot. Marks existing staging rows imported.
     """
     docs = _load_doc_candidates(session, client)
     linked_docs = _existing_doc_links(session)
     linked_activity_ids = _linked_activity_ids(session)
     linked_lot_ids = _linked_lot_ids(session)
+    lookups = load_identifier_lookups(session)
 
     activities_by_id = {
         row.id: row for row in session.scalars(select(Activity)).all()
@@ -363,7 +463,7 @@ def match_lots_to_documents(session: Session, client: PaperlessClient) -> MatchR
         for doc in docs:
             if doc.paperless_doc_id in linked_docs:
                 continue
-            if not _doc_matches_activity(doc, activity):
+            if not _doc_matches_activity(doc, activity, lookups):
                 continue
             matches.append(doc)
         if len(matches) > 1 and matches[0].unit_price is not None:
@@ -514,6 +614,7 @@ def link_lot_to_document(
         quantity=_as_decimal(payload.get("quantity")) or Decimal(activity.quantity),
         unit_price=_as_decimal(payload.get("unit_price")),
         payload=payload,
+        wkn=str(payload.get("wkn") or "").strip() or None,
     )
     detail = _attach_lot_link(
         session, doc=doc, lot=lot, activity=activity, link_type=LINK_TYPE_MANUAL
@@ -570,6 +671,7 @@ def match_staging_to_activities(session: Session) -> MatchResult:
     activities = list(session.scalars(select(Activity)).all())
     linked_docs = _existing_doc_links(session)
     linked_activity_ids = _linked_activity_ids(session)
+    lookups = load_identifier_lookups(session)
 
     matched = 0
     ambiguous = 0
@@ -593,6 +695,7 @@ def match_staging_to_activities(session: Session) -> MatchResult:
         payload = row.payload if isinstance(row.payload, dict) else {}
         wp_typ = str(payload.get("wp_typ") or "").strip().upper()
         isin = str(payload.get("isin") or payload.get("symbol") or "").strip()
+        wkn = str(payload.get("wkn") or "").strip() or None
         trade_date = _as_date(payload.get("trade_date"))
         quantity = _as_decimal(payload.get("quantity"))
         unit_price = _as_decimal(payload.get("unit_price"))
@@ -617,6 +720,8 @@ def match_staging_to_activities(session: Session) -> MatchResult:
             wp_typ=wp_typ,
             unit_price=unit_price,
             linked_activity_ids=linked_activity_ids,
+            lookups=lookups,
+            wkn=wkn,
         )
 
         if len(candidates) == 1:
