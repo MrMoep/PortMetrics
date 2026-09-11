@@ -131,7 +131,11 @@ def test_select_option_id_resolves_to_label() -> None:
             {"field": 5, "value": "EUR10"},
         ],
     )
-    roles = extract_fields_by_roles(doc, {"type": 17, "isin": 2, "quantity": 4, "unit_price": 5}, select_maps=maps)
+    roles = extract_fields_by_roles(
+        doc,
+        {"type": 17, "isin": 2, "quantity": 4, "unit_price": 5},
+        select_maps=maps,
+    )
     assert roles["type"] == "BUY"
     payload = build_staging_payload(doc, roles)
     assert payload["wp_typ"] == "BUY"
