@@ -136,3 +136,24 @@ def test_match_skips_already_linked_activity(db_session) -> None:
     # Linked activity is excluded; both staging rows stay unmatched.
     assert result.matched == 0
     assert result.unmatched >= 1
+
+
+def test_match_staging_bridges_preferred_symbol(db_session) -> None:
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    activity = _activity(isin="VGWL.DE", symbol="VGWL.DE")
+    staging = _staging(isin="IE00BK5BQT80", symbol="IE00BK5BQT80", wkn="A1JX52")
+    db_session.add_all([activity, staging])
+    upsert_mapping(
+        db_session,
+        isin="IE00BK5BQT80",
+        preferred_symbol="VGWL.DE",
+        wkn="A1JX52",
+    )
+    db_session.flush()
+
+    result = match_staging_to_activities(db_session)
+    assert result.matched == 1
+    assert result.unmatched == 0
+    db_session.refresh(staging)
+    assert staging.status == STATUS_IMPORTED

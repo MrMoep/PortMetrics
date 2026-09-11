@@ -17,7 +17,7 @@
 - Lots/Positionen: Spaltenkopf fest „Asset“ (unabhängig von der Anzeige-Präferenz)
 - Paperless-Sync: Skip-Gründe aggregiert (Log + Statuszeile); Select-Feld `Typ` und WKN-only Docs werden akzeptiert
 - Paperless Select-`Typ`: Option-IDs (`SXXG…`) werden über Custom-Field-Definition auf Labels (`BUY`/…) gemappt
-
+- Belege-Verknüpfen: Identity-Match über Kennungs-Tabelle (Paperless-ISIN/WKN ↔ Ghostfolio preferred_symbol)
 ### Changed
 - Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`
 - Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Ghostfolio-Import-Symbol = preferred_symbol (nicht roh ISIN)

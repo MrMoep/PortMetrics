@@ -9,10 +9,13 @@ from uuid import uuid4
 import httpx
 from sqlalchemy import select
 
+from portmetrics.assets.identifiers import IdentifierLookups
 from portmetrics.db.models import Activity, DocumentLink, Lot, LotStatus, StagingImport
 from portmetrics.paperless.client import PaperlessClient
 from portmetrics.paperless.mapping import save_paperless_settings
 from portmetrics.paperless.match import (
+    _activity_identity_keys,
+    _identities_overlap,
     link_lot_to_document,
     match_lots_to_documents,
     parse_paperless_doc_ref,
@@ -105,6 +108,33 @@ def test_parse_paperless_doc_ref() -> None:
     assert parse_paperless_doc_ref("https://paperless.example/documents/123/") == 123
     assert parse_paperless_doc_ref("https://paperless.example/documents/456") == 456
     assert parse_paperless_doc_ref("") is None
+
+
+def test_identity_bridge_isin_symbol_wkn() -> None:
+    lookups = IdentifierLookups(
+        wkn_by_isin={"IE00B3RBWM25": "A1JX52"},
+        name_by_isin={},
+        wkn_by_symbol={"VGWL.DE": "A1JX52"},
+        name_by_symbol={},
+        isin_by_symbol={"VGWL.DE": "IE00B3RBWM25"},
+    )
+    activity = _activity(isin="VGWL.DE", symbol="VGWL.DE")
+    keys = _activity_identity_keys(activity, lookups)
+    assert "VGWL.DE" in keys
+    assert "IE00B3RBWM25" in keys
+    assert "A1JX52" in keys
+    assert _identities_overlap("IE00B3RBWM25", activity, lookups, doc_wkn="A1JX52")
+    assert not _identities_overlap(
+        "IE00BK5BQT80",
+        activity,
+        IdentifierLookups(
+            wkn_by_isin={},
+            name_by_isin={},
+            wkn_by_symbol={},
+            name_by_symbol={},
+            isin_by_symbol={},
+        ),
+    )
 
 
 def test_preview_link_scope(db_session) -> None:
@@ -205,3 +235,67 @@ def test_link_lot_manual(db_session) -> None:
     assert detail["link_type"] == "manual"
     db_session.refresh(pending)
     assert pending.status == STATUS_IMPORTED
+
+
+def test_match_lots_bridges_preferred_symbol(db_session) -> None:
+    """Ghostfolio stores Yahoo tickers; Paperless stores ISIN — bridge via table."""
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    activity = _activity(isin="VGWL.DE", symbol="VGWL.DE")
+    db_session.add(activity)
+    db_session.flush()
+    db_session.add(
+        Lot(
+            activity_id=activity.id,
+            isin="VGWL.DE",
+            open_qty=Decimal("10"),
+            original_qty=Decimal("10"),
+            cost_basis=Decimal("1006.50"),
+            open_date=date(2024, 6, 1),
+            status=LotStatus.OPEN,
+        )
+    )
+    upsert_mapping(
+        db_session,
+        isin="IE00BK5BQT80",
+        preferred_symbol="VGWL.DE",
+        wkn="A1JX52",
+    )
+    save_paperless_settings(
+        db_session,
+        {"field_map": {"type": 1, "isin": 2, "wkn": 3, "quantity": 4, "unit_price": 5, "fee": 6}},
+    )
+    db_session.flush()
+
+    result = match_lots_to_documents(db_session, _client([_doc(55)]))
+    assert result.scanned == 1
+    assert result.matched == 1
+    link = db_session.scalar(select(DocumentLink))
+    assert link is not None
+    assert link.paperless_doc_id == 55
+
+
+def test_match_lots_without_mapping_stays_unmatched(db_session) -> None:
+    activity = _activity(isin="VGWL.DE", symbol="VGWL.DE")
+    db_session.add(activity)
+    db_session.flush()
+    db_session.add(
+        Lot(
+            activity_id=activity.id,
+            isin="VGWL.DE",
+            open_qty=Decimal("10"),
+            original_qty=Decimal("10"),
+            cost_basis=Decimal("1006.50"),
+            open_date=date(2024, 6, 1),
+            status=LotStatus.OPEN,
+        )
+    )
+    save_paperless_settings(
+        db_session,
+        {"field_map": {"type": 1, "isin": 2, "wkn": 3, "quantity": 4, "unit_price": 5, "fee": 6}},
+    )
+    db_session.flush()
+
+    result = match_lots_to_documents(db_session, _client([_doc(55)]))
+    assert result.matched == 0
+    assert result.unmatched == 1
