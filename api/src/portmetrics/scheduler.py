@@ -39,9 +39,12 @@ def job_sync_and_rebuild() -> None:
             fifo = rebuild_lots(session)
             days = rebuild_metrics_daily(session)
         logger.info(
-            "scheduled sync ok: fetched=%s upserted=%s prices=%s/%s lots=%s metrics_days=%s",
+            "scheduled sync ok: fetched=%s upserted=%s deleted=%s prune_skipped=%s "
+            "prices=%s/%s lots=%s metrics_days=%s",
             result.fetched,
             result.upserted,
+            result.deleted,
+            result.prune_skipped,
             prices.upserted,
             prices.assets,
             fifo.lots_created,

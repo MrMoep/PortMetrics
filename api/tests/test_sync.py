@@ -129,10 +129,12 @@ def test_sync_ghostfolio_activities_updates_sync_state(
 
     assert result.fetched == 1
     assert result.upserted == 1
+    assert result.deleted == 0
+    assert result.prune_skipped is False
     state = db_session.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_SOURCE))
     assert state is not None
     assert state.checksum == result.checksum
-    assert state.meta == {"fetched": 1}
+    assert state.meta == {"fetched": 1, "deleted": 0, "prune_skipped": False}
 
 
 def test_sync_skips_unsupported_activity_types(
@@ -171,9 +173,122 @@ def test_sync_skips_unsupported_activity_types(
 
     assert result.fetched == 2
     assert result.upserted == 1
+    assert result.deleted == 0
     rows = db_session.scalars(select(Activity)).all()
     assert len(rows) == 1
     assert rows[0].type == "BUY"
+
+
+def test_sync_prunes_activities_missing_from_ghostfolio(
+    db_session,
+    sample_activity_payload: dict,
+) -> None:
+    keep = GhostfolioActivity.from_api(sample_activity_payload)
+    gone_payload = {
+        **sample_activity_payload,
+        "id": str(UUID(int=99)),
+        "SymbolProfile": {
+            "symbol": "VWCE.DE",
+            "isin": "IE00BK5BQT80",
+            "dataSource": "YAHOO",
+        },
+    }
+    gone = GhostfolioActivity.from_api(gone_payload)
+    upsert_activities(db_session, [keep, gone])
+    db_session.flush()
+
+    # Paperless staging + document link for the orphaned activity
+    from datetime import date
+    from decimal import Decimal
+
+    from portmetrics.db.models import DocumentLink, Lot, StagingImport
+    from portmetrics.paperless.staging import STATUS_IMPORTED, STATUS_PENDING
+
+    orphan = db_session.scalars(
+        select(Activity).where(Activity.gf_activity_id == gone.id)
+    ).one()
+    lot = Lot(
+        activity_id=orphan.id,
+        isin="IE00BK5BQT80",
+        open_qty=Decimal("10"),
+        original_qty=Decimal("10"),
+        cost_basis=Decimal("1000"),
+        open_date=date(2024, 1, 15),
+        status="OPEN",
+    )
+    db_session.add(lot)
+    db_session.flush()
+    staging = StagingImport(
+        paperless_doc_id=4242,
+        payload={"isin": "IE00BK5BQT80", "symbol": "IE00BK5BQT80"},
+        status=STATUS_IMPORTED,
+        gf_activity_id=gone.id,
+    )
+    db_session.add(staging)
+    db_session.add(
+        DocumentLink(
+            paperless_doc_id=4242,
+            activity_id=orphan.id,
+            lot_id=lot.id,
+            link_type="source",
+        )
+    )
+    db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/anonymous"):
+            return httpx.Response(200, json={"authToken": "jwt-test"})
+        if request.url.path.endswith("/activities"):
+            return httpx.Response(200, json={"activities": [sample_activity_payload]})
+        raise AssertionError(request.url.path)
+
+    client = GhostfolioClient(
+        "http://ghostfolio.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = sync_ghostfolio_activities(db_session, client)
+    db_session.flush()
+
+    assert result.deleted == 1
+    assert result.prune_skipped is False
+    rows = db_session.scalars(select(Activity)).all()
+    assert len(rows) == 1
+    assert rows[0].gf_activity_id == keep.id
+    assert db_session.scalars(select(Lot)).all() == []
+    assert db_session.scalars(select(DocumentLink)).all() == []
+    db_session.refresh(staging)
+    assert staging.status == STATUS_PENDING
+    assert staging.gf_activity_id is None
+
+
+def test_sync_skips_prune_on_empty_ghostfolio_response(
+    db_session,
+    sample_activity_payload: dict,
+) -> None:
+    activity = GhostfolioActivity.from_api(sample_activity_payload)
+    upsert_activities(db_session, [activity])
+    db_session.flush()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/auth/anonymous"):
+            return httpx.Response(200, json={"authToken": "jwt-test"})
+        if request.url.path.endswith("/activities"):
+            return httpx.Response(200, json={"activities": []})
+        raise AssertionError(request.url.path)
+
+    client = GhostfolioClient(
+        "http://ghostfolio.test",
+        "secret",
+        transport=httpx.MockTransport(handler),
+    )
+    result = sync_ghostfolio_activities(db_session, client)
+    db_session.flush()
+
+    assert result.fetched == 0
+    assert result.deleted == 0
+    assert result.prune_skipped is True
+    assert len(db_session.scalars(select(Activity)).all()) == 1
 
 
 def test_auth_failure_raises() -> None:

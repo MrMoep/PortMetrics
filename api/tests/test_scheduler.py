@@ -68,6 +68,8 @@ def test_job_sync_happy_path(monkeypatch) -> None:
     class DummyResult:
         fetched = 1
         upserted = 1
+        deleted = 0
+        prune_skipped = False
 
     class DummyFifo:
         lots_created = 1
