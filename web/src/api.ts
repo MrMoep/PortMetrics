@@ -232,7 +232,20 @@ export const api = {
   version: () => request<VersionInfo>("/api/version"),
   overview: () => request<Overview>("/api/metrics/overview"),
   lots: () => request<{ lots: Lot[] }>("/api/lots"),
-  sync: () => request<Record<string, unknown>>("/api/sync/ghostfolio", { method: "POST" }),
+  sync: () =>
+    request<{
+      fetched: number;
+      upserted: number;
+      deleted: number;
+      prune_skipped?: boolean;
+      checksum: string;
+      price_assets: number;
+      price_upserted: number;
+      price_skipped: number;
+      lots_created: number;
+      consumptions: number;
+      metrics_days: number;
+    }>("/api/sync/ghostfolio", { method: "POST" }),
   rebuildFifo: () => request<Record<string, unknown>>("/api/fifo/rebuild", { method: "POST" }),
   rebuildMetrics: () =>
     request<Record<string, unknown>>("/api/metrics/rebuild", { method: "POST" }),

@@ -292,14 +292,31 @@ const OPS_ACTIONS: {
   label: string;
   hint: string;
   icon: IconName;
+  /** Return a string to customize the status bar; otherwise `${label} OK`. */
   run: () => Promise<unknown>;
 }[] = [
   {
     id: "sync",
     label: "Sync Ghostfolio",
-    hint: "Activities & Kurse aus Ghostfolio nach PostgreSQL ziehen.",
+    hint: "Activities & Kurse aus Ghostfolio nach PostgreSQL ziehen. Lokal fehlende GF-Einträge werden entfernt.",
     icon: "sync",
-    run: () => api.sync(),
+    run: async () => {
+      const result = await api.sync();
+      const deleted = result.deleted ?? 0;
+      if (deleted > 0) {
+        return (
+          `Sync Ghostfolio OK · ${deleted} ${deleted === 1 ? "Activity" : "Activities"} entfernt ` +
+          `(in Ghostfolio nicht mehr vorhanden)`
+        );
+      }
+      if (result.prune_skipped) {
+        return (
+          `Sync Ghostfolio OK · fetched ${result.fetched}, upserted ${result.upserted} ` +
+          `(Prune übersprungen: leere GF-Antwort)`
+        );
+      }
+      return `Sync Ghostfolio OK · fetched ${result.fetched}, upserted ${result.upserted}`;
+    },
   },
   {
     id: "fifo",
@@ -600,9 +617,9 @@ export default function App() {
     setError("");
     setStatus(`${label}…`);
     try {
-      await fn();
+      const result = await fn();
       await refresh();
-      setStatus(`${label} OK`);
+      setStatus(typeof result === "string" ? result : `${label} OK`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("");

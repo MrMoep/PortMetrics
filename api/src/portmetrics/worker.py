@@ -38,7 +38,8 @@ def cmd_sync_ghostfolio() -> int:
         return 1
     print(
         f"synced ghostfolio activities: fetched={result.fetched} "
-        f"upserted={result.upserted} checksum={result.checksum} "
+        f"upserted={result.upserted} deleted={result.deleted} "
+        f"prune_skipped={result.prune_skipped} checksum={result.checksum} "
         f"prices={prices.upserted}/{prices.assets} "
         f"lots={fifo.lots_created} consumptions={fifo.consumptions}"
     )

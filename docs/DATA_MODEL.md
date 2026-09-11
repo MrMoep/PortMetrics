@@ -17,7 +17,7 @@ activities / lots (n) ←── (n) document_links ──→ paperless doc
 
 ### `activities`
 
-Gespiegelte Transaktionen aus Ghostfolio.
+Gespiegelte Transaktionen aus Ghostfolio. Der Sync upsertet und entfernt Orphans (Activities, deren `gf_activity_id` in Ghostfolio nicht mehr vorkommt).
 
 | Spalte | Typ | Beschreibung |
 |--------|-----|--------------|

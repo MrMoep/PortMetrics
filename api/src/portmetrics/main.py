@@ -180,6 +180,8 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
     return {
         "fetched": result.fetched,
         "upserted": result.upserted,
+        "deleted": result.deleted,
+        "prune_skipped": result.prune_skipped,
         "checksum": result.checksum,
         "price_assets": prices.assets,
         "price_upserted": prices.upserted,

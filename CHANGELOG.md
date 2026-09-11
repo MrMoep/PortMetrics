@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Features
+- Ghostfolio-Sync **Orphan-Prune**: lokal fehlende GF-Activities werden entfernt; Staging `imported` → `pending`; Statuszeile zeigt gelöschte Anzahl
+
 ### Changed
 - Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`
 - Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Symbol = ISIN
