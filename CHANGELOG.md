@@ -10,6 +10,8 @@
 
 ### Fixed
 - Assets-Tabelle nutzt volle Panel-Breite; Staging→Tabelle übernimmt ISIN/WKN (und Symbol-Vorschlag) in den Entwurf
+- Anzeige-Kennung (Name/WKN/ISIN) löst auch über Preferred Symbol auf, wenn Ghostfolio-Activities keine ISIN haben
+- Lots/Positionen: Spaltenkopf fest „Asset“ (unabhängig von der Anzeige-Präferenz)
 
 ### Changed
 - Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`

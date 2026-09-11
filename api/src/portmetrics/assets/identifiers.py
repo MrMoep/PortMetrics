@@ -105,15 +105,62 @@ def preferred_symbol_map(session: Session) -> dict[str, str]:
 
 
 def display_name_map(session: Session) -> dict[str, str]:
-    rows = session.scalars(
-        select(AssetIdentifier).where(AssetIdentifier.display_name.is_not(None))
-    ).all()
-    out: dict[str, str] = {}
+    return dict(load_identifier_lookups(session).name_by_isin)
+
+
+@dataclass(frozen=True)
+class IdentifierLookups:
+    """ISIN- and preferred-symbol-keyed views of asset_identifiers.
+
+    Ghostfolio activities are keyed by symbol; Paperless by ISIN. Display
+    enrichment resolves via either bridge.
+    """
+
+    wkn_by_isin: dict[str, str]
+    name_by_isin: dict[str, str]
+    wkn_by_symbol: dict[str, str]
+    name_by_symbol: dict[str, str]
+    isin_by_symbol: dict[str, str]
+
+
+def empty_identifier_lookups() -> IdentifierLookups:
+    return IdentifierLookups(
+        wkn_by_isin={},
+        name_by_isin={},
+        wkn_by_symbol={},
+        name_by_symbol={},
+        isin_by_symbol={},
+    )
+
+
+def load_identifier_lookups(session: Session) -> IdentifierLookups:
+    rows = session.scalars(select(AssetIdentifier)).all()
+    wkn_by_isin: dict[str, str] = {}
+    name_by_isin: dict[str, str] = {}
+    wkn_by_symbol: dict[str, str] = {}
+    name_by_symbol: dict[str, str] = {}
+    isin_by_symbol: dict[str, str] = {}
     for row in rows:
+        wkn = normalize_wkn(row.wkn)
         name = normalize_display_name(row.display_name)
+        symbol = normalize_symbol(row.preferred_symbol)
+        if wkn:
+            wkn_by_isin[row.isin] = wkn
         if name:
-            out[row.isin] = name
-    return out
+            name_by_isin[row.isin] = name
+        if symbol:
+            isin_by_symbol[symbol] = row.isin
+            if wkn:
+                wkn_by_symbol[symbol] = wkn
+            if name:
+                name_by_symbol[symbol] = name
+    return IdentifierLookups(
+        wkn_by_isin=wkn_by_isin,
+        name_by_isin=name_by_isin,
+        wkn_by_symbol=wkn_by_symbol,
+        name_by_symbol=name_by_symbol,
+        isin_by_symbol=isin_by_symbol,
+    )
 
 
 def upsert_mapping(
@@ -277,8 +324,7 @@ def upsert_from_payload(session: Session, payload: dict[str, Any] | None) -> Ass
 
 
 def wkn_map(session: Session) -> dict[str, str]:
-    rows = session.scalars(select(AssetIdentifier)).all()
-    return {row.isin: row.wkn for row in rows if normalize_wkn(row.wkn)}
+    return dict(load_identifier_lookups(session).wkn_by_isin)
 
 
 def paperless_doc_map(session: Session) -> dict[str, int]:
@@ -434,31 +480,65 @@ def pick_display_id(
     return asset_key or "—"
 
 
+def _lookup_symbol_key(symbol: str | None, asset_key: str) -> str | None:
+    """Ghostfolio join key: activity symbol, else non-ISIN asset key."""
+    for candidate in (symbol, asset_key):
+        normalized = normalize_symbol(candidate)
+        if normalized and not looks_like_isin(normalized):
+            return normalized
+    return None
+
+
 def enrich_asset_fields(
     *,
     asset_key: str,
     activity_isin: str | None,
     symbol: str | None,
-    wkn_by_isin: dict[str, str],
     preference: str,
+    lookups: IdentifierLookups | None = None,
+    wkn_by_isin: dict[str, str] | None = None,
     display_name_by_isin: dict[str, str] | None = None,
 ) -> dict[str, str | None]:
+    """Resolve WKN / display_name / display_id for an activity or lot.
+
+    Lookup order for table fields: ISIN first, then preferred_symbol (Ghostfolio).
+    Legacy ``wkn_by_isin`` / ``display_name_by_isin`` still work when ``lookups``
+    is omitted (ISIN-only).
+    """
+    if lookups is None:
+        lookups = IdentifierLookups(
+            wkn_by_isin=dict(wkn_by_isin or {}),
+            name_by_isin=dict(display_name_by_isin or {}),
+            wkn_by_symbol={},
+            name_by_symbol={},
+            isin_by_symbol={},
+        )
+
     isin_code = resolve_isin_code(
         activity_isin=activity_isin,
         asset_key=asset_key,
         symbol=symbol,
     )
+    symbol_key = _lookup_symbol_key(symbol, asset_key)
+    if not isin_code and symbol_key and symbol_key in lookups.isin_by_symbol:
+        isin_code = lookups.isin_by_symbol[symbol_key]
+
     wkn = None
     for key in (isin_code, normalize_isin(asset_key)):
-        if key and key in wkn_by_isin:
-            wkn = wkn_by_isin[key]
+        if key and key in lookups.wkn_by_isin:
+            wkn = lookups.wkn_by_isin[key]
             break
+    if wkn is None and symbol_key and symbol_key in lookups.wkn_by_symbol:
+        wkn = lookups.wkn_by_symbol[symbol_key]
+
     name = None
-    names = display_name_by_isin or {}
     for key in (isin_code, normalize_isin(asset_key)):
-        if key and key in names:
-            name = names[key]
+        if key and key in lookups.name_by_isin:
+            name = lookups.name_by_isin[key]
             break
+    if name is None and symbol_key and symbol_key in lookups.name_by_symbol:
+        name = lookups.name_by_symbol[symbol_key]
+
     display_id = pick_display_id(
         preference=preference,
         symbol=symbol,

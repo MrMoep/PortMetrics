@@ -13,7 +13,6 @@ import {
 } from "./api";
 import {
   SETTINGS_SECTIONS,
-  assetIdColumnLabel,
   money,
   parseSettingsHash,
   pct,
@@ -1236,7 +1235,7 @@ export default function App() {
               <thead>
                 <tr>
                   <SortHeader
-                    label={assetIdColumnLabel(portfolioSettings?.asset_id_preference)}
+                    label="Asset"
                     column="display_id"
                     sort={lotsSort}
                     onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
@@ -1337,7 +1336,7 @@ export default function App() {
               <thead>
                 <tr>
                   <SortHeader
-                    label={assetIdColumnLabel(portfolioSettings?.asset_id_preference)}
+                    label="Asset"
                     column="display_id"
                     sort={positionsSort}
                     onSort={(column) => setPositionsSort((s) => toggleSort(s, column))}
@@ -1658,8 +1657,9 @@ export default function App() {
           {settingsSection === "portfolio" && (
             <Panel label="Portfolio / Steuer & Risiko">
               <p className="muted">
-                Freibetrag, risikofreier Zins für Sharpe und Anzeige-Kennung (Symbol/WKN/ISIN) für Lots
-                und Positionen. Werte sind Schätzungen — keine Steuerberatung
+                Freibetrag, risikofreier Zins für Sharpe und Anzeige-Kennung für die Spalte
+                „Asset“ in Lots und Positionen (Symbol/Name/WKN/ISIN). Werte sind Schätzungen —
+                keine Steuerberatung
                 {portfolioSettings
                   ? ` (aktuell Freibetrag ${showMode ? "0,00" : portfolioSettings.tax_allowance_eur} EUR).`
                   : "."}
@@ -1705,8 +1705,8 @@ export default function App() {
                     <option value="isin">ISIN</option>
                   </select>
                   <span className="muted">
-                    Bei „Name“: display_name → Symbol → ISIN/WKN. Ohne Name Fallback auf Symbol.
-                    Default bleibt Symbol; Einstellung speicherbar.
+                    Auflösung über Preferred Symbol (Ghostfolio) und ISIN. Bei „Name“ ohne
+                    display_name: Fallback Symbol. Einstellung speicherbar.
                   </span>
                 </label>
                 <button className="primary" type="submit">

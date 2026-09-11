@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetIdColumnLabel,
   cmpScalar,
   money,
   parseSettingsHash,
@@ -70,14 +69,6 @@ describe("formatters", () => {
     expect(signedClass("-0.5")).toBe("val-neg");
     expect(signedClass("0")).toBe("");
     expect(signedClass("1", true)).toBe("");
-  });
-
-  it("assetIdColumnLabel", () => {
-    expect(assetIdColumnLabel("wkn")).toBe("WKN");
-    expect(assetIdColumnLabel("isin")).toBe("ISIN");
-    expect(assetIdColumnLabel("name")).toBe("Name");
-    expect(assetIdColumnLabel("symbol")).toBe("Symbol");
-    expect(assetIdColumnLabel(null)).toBe("Symbol");
   });
 });
 
