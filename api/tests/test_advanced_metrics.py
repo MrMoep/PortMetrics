@@ -73,11 +73,29 @@ def test_dated_cashflows_signs() -> None:
     activities = [
         _act(day=date(2024, 1, 1), typ="BUY", qty="2", price="50", fee="1", id_=1),
         _act(day=date(2024, 2, 1), typ="SELL", qty="1", price="60", fee="1", id_=2),
+        _act(day=date(2024, 3, 1), typ="DIVIDEND", qty="1", price="2.5", id_=3),
+        _act(day=date(2024, 4, 1), typ="INTEREST", qty="1", price="1.5", id_=4),
     ]
     flows = dated_cashflows(activities)
     assert flows[0][1] == Decimal("-101")
     assert flows[1][1] == Decimal("59")
+    assert flows[2][1] == Decimal("2.5")
+    assert flows[3][1] == Decimal("1.5")
 
+
+def test_cashflow_timeline_includes_type_and_asset() -> None:
+    from portmetrics.metrics.irr import cashflow_timeline
+
+    activities = [
+        _act(day=date(2024, 1, 1), typ="BUY", qty="1", price="100", isin="VWCE", id_=1),
+        _act(day=date(2024, 6, 1), typ="DIVIDEND", qty="1", price="3", isin="VWCE", id_=2),
+    ]
+    rows = cashflow_timeline(activities, display_id_by_key={"VWCE": "VWCE"})
+    assert len(rows) == 2
+    assert rows[0]["type"] == "BUY"
+    assert rows[0]["asset"] == "VWCE"
+    assert rows[1]["type"] == "DIVIDEND"
+    assert rows[1]["amount"] == "3"
 
 def test_max_drawdown() -> None:
     navs = [
@@ -164,5 +182,62 @@ def test_tax_allowance_from_fifo(db_session) -> None:
     save_portfolio_settings(db_session, {"tax_allowance_eur": "1000", "tax_warn_pct": "0.5"})
     payload = tax_allowance_payload(db_session, as_of=date(2025, 6, 1))
     assert Decimal(payload["realized_ytd"]) == Decimal("100")
+    assert Decimal(payload["dividends_ytd"]) == Decimal("0")
+    assert Decimal(payload["interest_ytd"]) == Decimal("0")
+    assert Decimal(payload["taxable_ytd"]) == Decimal("100")
     assert Decimal(payload["remaining"]) == Decimal("900")
     assert payload["warn"] is False
+
+
+def test_tax_allowance_includes_dividends_and_interest(db_session) -> None:
+    from portmetrics.metrics.tax_allowance import tax_allowance_payload
+
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="a",
+            isin="IE00",
+            symbol="IE00",
+            type="DIVIDEND",
+            quantity=Decimal("1"),
+            unit_price=Decimal("40"),
+            fee=Decimal("5"),
+            currency="EUR",
+            trade_date=date(2025, 4, 1),
+        )
+    )
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="a",
+            isin="CASH",
+            symbol="CASH",
+            type="INTEREST",
+            quantity=Decimal("1"),
+            unit_price=Decimal("10"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2025, 5, 1),
+        )
+    )
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="a",
+            isin="IE00",
+            symbol="IE00",
+            type="DIVIDEND",
+            quantity=Decimal("1"),
+            unit_price=Decimal("99"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2024, 12, 1),
+        )
+    )
+    db_session.flush()
+    save_portfolio_settings(db_session, {"tax_allowance_eur": "1000", "tax_warn_pct": "0.5"})
+    payload = tax_allowance_payload(db_session, as_of=date(2025, 6, 1))
+    assert Decimal(payload["dividends_ytd"]) == Decimal("40")
+    assert Decimal(payload["interest_ytd"]) == Decimal("10")
+    assert Decimal(payload["taxable_ytd"]) == Decimal("50")
+    assert Decimal(payload["remaining"]) == Decimal("950")

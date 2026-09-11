@@ -12,6 +12,25 @@ from portmetrics.metrics.periods import ZERO, _asset_key, _d, nav_as_of
 _IRR_LO = Decimal("-0.99")
 _IRR_HI = Decimal("10")
 
+# External capital + distributed income (securities-only NAV).
+TRADE_TYPES = frozenset({"BUY", "SELL"})
+INCOME_TYPES = frozenset({"DIVIDEND", "INTEREST"})
+CASHFLOW_TYPES = TRADE_TYPES | INCOME_TYPES
+
+
+def _signed_amount(activity: Activity) -> Decimal | None:
+    """Cashflow sign convention: BUY −, SELL/DIVIDEND/INTEREST +."""
+    if activity.type not in CASHFLOW_TYPES:
+        return None
+    amount = _d(activity.quantity) * _d(activity.unit_price)
+    fee = _d(activity.fee)
+    if activity.type == "BUY":
+        return -(amount + fee)
+    if activity.type == "SELL":
+        return amount - fee
+    # DIVIDEND / INTEREST: gross distribution (fee = withholding, not netted here)
+    return amount
+
 
 def dated_cashflows(
     activities: list[Activity],
@@ -19,21 +38,17 @@ def dated_cashflows(
     asset_key: str | None = None,
 ) -> list[tuple[date, Decimal]]:
     """
-    External cashflows: BUY = outflow (−), SELL = inflow (+).
-    Fees included. Filtered by asset_key when set.
+    External cashflows for IRR: BUY = outflow (−), SELL/DIVIDEND/INTEREST = inflow (+).
+    Trade fees included on BUY/SELL. Filtered by asset_key when set.
     """
     flows: list[tuple[date, Decimal]] = []
     for activity in activities:
-        if activity.type not in {"BUY", "SELL"}:
-            continue
         if asset_key is not None and _asset_key(activity) != asset_key:
             continue
-        amount = _d(activity.quantity) * _d(activity.unit_price)
-        fee = _d(activity.fee)
-        if activity.type == "BUY":
-            flows.append((activity.trade_date, -(amount + fee)))
-        else:
-            flows.append((activity.trade_date, amount - fee))
+        signed = _signed_amount(activity)
+        if signed is None:
+            continue
+        flows.append((activity.trade_date, signed))
     flows.sort(key=lambda x: x[0])
     return flows
 
@@ -147,8 +162,26 @@ def cashflow_timeline(
     activities: list[Activity],
     *,
     asset_key: str | None = None,
+    display_id_by_key: dict[str, str] | None = None,
 ) -> list[dict]:
-    return [
-        {"date": day.isoformat(), "amount": str(amount)}
-        for day, amount in dated_cashflows(activities, asset_key=asset_key)
-    ]
+    """Dated cashflow events for UI (BUY/SELL/DIVIDEND/INTEREST)."""
+    rows: list[dict] = []
+    for activity in activities:
+        key = _asset_key(activity)
+        if asset_key is not None and key != asset_key:
+            continue
+        signed = _signed_amount(activity)
+        if signed is None:
+            continue
+        display = (display_id_by_key or {}).get(key) or activity.symbol or key or "—"
+        rows.append(
+            {
+                "date": activity.trade_date.isoformat(),
+                "type": activity.type,
+                "asset": display,
+                "asset_key": key,
+                "amount": str(signed),
+            }
+        )
+    rows.sort(key=lambda r: (r["date"], r["type"], r["asset"]))
+    return rows
