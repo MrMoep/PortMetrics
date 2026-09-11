@@ -578,6 +578,36 @@ def confirm_staging(
     return _serialize_staging(session, row)
 
 
+def relink_staging_document(session: Session, staging_id: int) -> bool:
+    """Attach DocumentLink activity/lot after a post-confirm Ghostfolio sync."""
+    row = session.get(StagingImport, staging_id)
+    if row is None or row.gf_activity_id is None:
+        return False
+    local_activity_id = _local_activity_pk(session, row.gf_activity_id)
+    if local_activity_id is None:
+        return False
+    lot = session.scalar(select(Lot).where(Lot.activity_id == local_activity_id))
+    lot_id = lot.id if lot is not None else None
+    link = session.scalar(
+        select(DocumentLink).where(DocumentLink.paperless_doc_id == row.paperless_doc_id)
+    )
+    if link is None:
+        session.add(
+            DocumentLink(
+                paperless_doc_id=row.paperless_doc_id,
+                activity_id=local_activity_id,
+                lot_id=lot_id,
+                link_type="source",
+            )
+        )
+    else:
+        link.activity_id = local_activity_id
+        if lot_id is not None:
+            link.lot_id = lot_id
+    session.flush()
+    return True
+
+
 def _extract_activity_id(imported: dict[str, Any]) -> UUID | None:
     activities = imported.get("activities") or []
     if not activities:

@@ -524,6 +524,66 @@ def test_confirm_missing_raises(db_session) -> None:
         confirm_staging(db_session, 99999, ghostfolio)
 
 
+def test_relink_staging_document_after_sync(db_session) -> None:
+    from datetime import date
+    from decimal import Decimal
+
+    from portmetrics.db.models import Activity, Lot
+    from portmetrics.paperless.staging import relink_staging_document
+
+    gf_id = uuid4()
+    row = StagingImport(
+        paperless_doc_id=77,
+        payload=build_staging_payload(_doc(77), extract_custom_fields(_doc(77), FIELD_MAP)),
+        status=STATUS_IMPORTED,
+        gf_activity_id=gf_id,
+    )
+    db_session.add(row)
+    db_session.add(
+        DocumentLink(
+            paperless_doc_id=77,
+            activity_id=None,
+            lot_id=None,
+            link_type="source",
+        )
+    )
+    db_session.flush()
+
+    assert relink_staging_document(db_session, row.id) is False
+
+    activity = Activity(
+        gf_activity_id=gf_id,
+        account_id="acc",
+        isin="IE00BK5BQT80",
+        symbol="VWCE.DE",
+        type="BUY",
+        quantity=Decimal("10"),
+        unit_price=Decimal("100"),
+        fee=Decimal("1"),
+        currency="EUR",
+        trade_date=date(2024, 6, 1),
+    )
+    db_session.add(activity)
+    db_session.flush()
+    lot = Lot(
+        activity_id=activity.id,
+        isin="IE00BK5BQT80",
+        open_qty=Decimal("10"),
+        original_qty=Decimal("10"),
+        cost_basis=Decimal("1001"),
+        open_date=date(2024, 6, 1),
+        status="OPEN",
+    )
+    db_session.add(lot)
+    db_session.flush()
+
+    assert relink_staging_document(db_session, row.id) is True
+    link = db_session.scalar(select(DocumentLink).where(DocumentLink.paperless_doc_id == 77))
+    assert link is not None
+    assert link.activity_id == activity.id
+    assert link.lot_id == lot.id
+
+
 def test_parse_paperless_document_id() -> None:
     from portmetrics.paperless.staging import parse_paperless_document_id
 
