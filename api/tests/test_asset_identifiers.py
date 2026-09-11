@@ -62,6 +62,39 @@ def test_pick_display_id_fallback_chain() -> None:
     )
 
 
+def test_enrich_via_preferred_symbol_without_activity_isin() -> None:
+    from portmetrics.assets.identifiers import IdentifierLookups, enrich_asset_fields
+
+    lookups = IdentifierLookups(
+        wkn_by_isin={"IE000BI80T95": "ETF146"},
+        name_by_isin={"IE000BI80T95": "ETF MSCI World"},
+        wkn_by_symbol={"MWRE.DE": "ETF146"},
+        name_by_symbol={"MWRE.DE": "ETF MSCI World"},
+        isin_by_symbol={"MWRE.DE": "IE000BI80T95"},
+    )
+    ids = enrich_asset_fields(
+        asset_key="MWRE.DE",
+        activity_isin=None,
+        symbol="MWRE.DE",
+        preference="name",
+        lookups=lookups,
+    )
+    assert ids["isin_code"] == "IE000BI80T95"
+    assert ids["wkn"] == "ETF146"
+    assert ids["display_name"] == "ETF MSCI World"
+    assert ids["display_id"] == "ETF MSCI World"
+    assert (
+        enrich_asset_fields(
+            asset_key="MWRE.DE",
+            activity_isin=None,
+            symbol="MWRE.DE",
+            preference="wkn",
+            lookups=lookups,
+        )["display_id"]
+        == "ETF146"
+    )
+
+
 def test_upsert_isin_wkn_and_lots_display(db_session: Session) -> None:
     upsert_isin_wkn(
         db_session,
@@ -241,3 +274,52 @@ def test_display_name_in_lots(db_session: Session) -> None:
     lots = list_open_lots(db_session)
     assert lots[0]["display_name"] == "Vanguard FTSE All-World"
     assert lots[0]["display_id"] == "Vanguard FTSE All-World"
+
+
+def test_display_pref_via_preferred_symbol_when_activity_isin_missing(
+    db_session: Session,
+) -> None:
+    """Ghostfolio mirror often has symbol but no ISIN — resolve via preferred_symbol."""
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    upsert_mapping(
+        db_session,
+        isin="IE000BI80T95",
+        wkn="ETF146",
+        preferred_symbol="MWRE.DE",
+        display_name="ETF MSCI World",
+    )
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="acc",
+            isin=None,
+            symbol="MWRE.DE",
+            type="BUY",
+            quantity=Decimal("5"),
+            unit_price=Decimal("50"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2024, 2, 1),
+        )
+    )
+    db_session.flush()
+    rebuild_lots(db_session)
+
+    save_portfolio_settings(db_session, {"asset_id_preference": "name"})
+    lots = list_open_lots(db_session)
+    assert lots[0]["isin"] == "MWRE.DE"
+    assert lots[0]["isin_code"] == "IE000BI80T95"
+    assert lots[0]["display_name"] == "ETF MSCI World"
+    assert lots[0]["display_id"] == "ETF MSCI World"
+
+    save_portfolio_settings(db_session, {"asset_id_preference": "wkn"})
+    lots = list_open_lots(db_session)
+    assert lots[0]["wkn"] == "ETF146"
+    assert lots[0]["display_id"] == "ETF146"
+
+    save_portfolio_settings(db_session, {"asset_id_preference": "isin"})
+    assert list_open_lots(db_session)[0]["display_id"] == "IE000BI80T95"
+
+    save_portfolio_settings(db_session, {"asset_id_preference": "symbol"})
+    assert list_open_lots(db_session)[0]["display_id"] == "MWRE.DE"

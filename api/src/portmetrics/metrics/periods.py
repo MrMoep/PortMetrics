@@ -472,7 +472,7 @@ def rebuild_metrics_daily(session: Session, *, end: date | None = None) -> int:
 def overview_payload(session: Session, as_of: date | None = None) -> dict:
     from decimal import Decimal as D
 
-    from portmetrics.assets.identifiers import display_name_map, enrich_asset_fields, wkn_map
+    from portmetrics.assets.identifiers import enrich_asset_fields, load_identifier_lookups
     from portmetrics.metrics.irr import cashflow_timeline, irr_payload
     from portmetrics.metrics.risk import position_drawdown, risk_payload
     from portmetrics.metrics.tax_allowance import tax_allowance_payload
@@ -491,8 +491,7 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
     portfolio_cfg = get_portfolio_settings(session)
     risk_free = D(portfolio_cfg["risk_free_rate"])
     preference = portfolio_cfg["asset_id_preference"]
-    wkn_by_isin = wkn_map(session)
-    names_by_isin = display_name_map(session)
+    lookups = load_identifier_lookups(session)
     display_id_by_key: dict[str, str] = {}
     for activity in activities:
         key = _asset_key(activity)
@@ -502,9 +501,8 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
             asset_key=key,
             activity_isin=activity.isin,
             symbol=activity.symbol,
-            wkn_by_isin=wkn_by_isin,
             preference=preference,
-            display_name_by_isin=names_by_isin,
+            lookups=lookups,
         )
         display_id_by_key[key] = ids["display_id"] or key
     mwr = irr_payload(activities, prices, as_of=end)

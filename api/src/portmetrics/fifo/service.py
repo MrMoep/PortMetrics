@@ -9,10 +9,9 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from portmetrics.assets.identifiers import (
-    display_name_map,
     enrich_asset_fields,
+    load_identifier_lookups,
     paperless_doc_map,
-    wkn_map,
 )
 from portmetrics.db.models import (
     Activity,
@@ -220,8 +219,7 @@ def list_open_lots(
         row.id: row
         for row in session.scalars(select(Activity).where(Activity.id.in_(activity_ids))).all()
     } if activity_ids else {}
-    wkn_by_isin = wkn_map(session)
-    name_by_isin = display_name_map(session)
+    lookups = load_identifier_lookups(session)
     paperless_by_lot = _lot_paperless_docs(session, rows, activities)
     preference = get_portfolio_settings(session)["asset_id_preference"]
     out: list[dict] = []
@@ -249,9 +247,8 @@ def list_open_lots(
             asset_key=lot.isin,
             activity_isin=activity.isin if activity else None,
             symbol=activity.symbol if activity else None,
-            wkn_by_isin=wkn_by_isin,
             preference=preference,
-            display_name_by_isin=name_by_isin,
+            lookups=lookups,
         )
         out.append(
             {
