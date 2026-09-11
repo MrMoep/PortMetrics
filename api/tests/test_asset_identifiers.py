@@ -38,6 +38,28 @@ def test_pick_display_id_fallback_chain() -> None:
         )
         == "IE00BK5BQT80"
     )
+    assert (
+        pick_display_id(
+            preference="name",
+            symbol="VWCE.DE",
+            wkn="A1JX52",
+            isin="IE00BK5BQT80",
+            asset_key="IE00BK5BQT80",
+            display_name="Vanguard FTSE All-World",
+        )
+        == "Vanguard FTSE All-World"
+    )
+    assert (
+        pick_display_id(
+            preference="name",
+            symbol="VWCE.DE",
+            wkn="A1JX52",
+            isin="IE00BK5BQT80",
+            asset_key="IE00BK5BQT80",
+            display_name=None,
+        )
+        == "VWCE.DE"
+    )
 
 
 def test_upsert_isin_wkn_and_lots_display(db_session: Session) -> None:
@@ -185,3 +207,37 @@ def test_portfolio_asset_id_preference_default(db_session: Session) -> None:
     assert cfg["asset_id_preference"] == "symbol"
     saved = save_portfolio_settings(db_session, {"asset_id_preference": "isin"})
     assert saved["asset_id_preference"] == "isin"
+    named = save_portfolio_settings(db_session, {"asset_id_preference": "name"})
+    assert named["asset_id_preference"] == "name"
+
+
+def test_display_name_in_lots(db_session: Session) -> None:
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    upsert_mapping(
+        db_session,
+        isin="IE00BK5BQT80",
+        wkn="A1JX52",
+        preferred_symbol="VWCE.DE",
+        display_name="Vanguard FTSE All-World",
+    )
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="acc",
+            isin="IE00BK5BQT80",
+            symbol="VWCE.DE",
+            type="BUY",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2024, 1, 1),
+        )
+    )
+    db_session.flush()
+    rebuild_lots(db_session)
+    save_portfolio_settings(db_session, {"asset_id_preference": "name"})
+    lots = list_open_lots(db_session)
+    assert lots[0]["display_name"] == "Vanguard FTSE All-World"
+    assert lots[0]["display_id"] == "Vanguard FTSE All-World"

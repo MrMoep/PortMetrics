@@ -5,6 +5,7 @@
 ### Features
 - Kennungs-Tabelle ISIN/WKN/preferred Symbol (Einstellungen → Assets); Paperless-Confirm blockiert ohne Mapping; Historien-Vorschlag + Staging-Deep-Link (#57)
 - Ghostfolio-Sync **Orphan-Prune**: lokal fehlende GF-Activities werden entfernt; Staging `imported` → `pending`; Statuszeile zeigt gelöschte Anzahl
+- Optional `display_name` in Kennungs-Tabelle; Anzeige-Präferenz `name` (Fallback Symbol), Default bleibt `symbol`
 
 ### Fixed
 - Assets-Tabelle nutzt volle Panel-Breite; Staging→Tabelle übernimmt ISIN/WKN (und Symbol-Vorschlag) in den Entwurf

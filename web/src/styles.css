@@ -648,17 +648,22 @@ th {
 
 .assets-table th:nth-child(2),
 .assets-table td:nth-child(2) {
-  width: 18%;
+  width: 22%;
 }
 
 .assets-table th:nth-child(3),
 .assets-table td:nth-child(3) {
-  width: 36%;
+  width: 14%;
 }
 
 .assets-table th:nth-child(4),
 .assets-table td:nth-child(4) {
-  width: 18%;
+  width: 22%;
+}
+
+.assets-table th:nth-child(5),
+.assets-table td:nth-child(5) {
+  width: 14%;
   white-space: nowrap;
 }
 

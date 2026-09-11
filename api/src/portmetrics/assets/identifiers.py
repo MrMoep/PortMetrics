@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from portmetrics.db.models import Activity, AssetIdentifier, StagingImport
 
-ASSET_ID_PREFERENCES = ("symbol", "wkn", "isin")
+ASSET_ID_PREFERENCES = ("symbol", "wkn", "isin", "name")
 DEFAULT_ASSET_ID_PREFERENCE = "symbol"
 SETTINGS_ASSETS_HASH = "#settings/assets"
 
@@ -62,11 +62,19 @@ def normalize_symbol(value: str | None) -> str | None:
     return text or None
 
 
+def normalize_display_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = value.strip()
+    return text or None
+
+
 def serialize_identifier(row: AssetIdentifier) -> dict[str, Any]:
     return {
         "isin": row.isin,
         "wkn": row.wkn,
         "preferred_symbol": row.preferred_symbol,
+        "display_name": row.display_name,
         "paperless_doc_id": row.paperless_doc_id,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -96,12 +104,25 @@ def preferred_symbol_map(session: Session) -> dict[str, str]:
     return out
 
 
+def display_name_map(session: Session) -> dict[str, str]:
+    rows = session.scalars(
+        select(AssetIdentifier).where(AssetIdentifier.display_name.is_not(None))
+    ).all()
+    out: dict[str, str] = {}
+    for row in rows:
+        name = normalize_display_name(row.display_name)
+        if name:
+            out[row.isin] = name
+    return out
+
+
 def upsert_mapping(
     session: Session,
     *,
     isin: str,
     wkn: str | None = None,
     preferred_symbol: str | None = None,
+    display_name: str | None = None,
     paperless_doc_id: int | None = None,
     clear_missing: bool = False,
 ) -> AssetIdentifier:
@@ -112,12 +133,14 @@ def upsert_mapping(
 
     wkn_n = normalize_wkn(wkn)
     symbol_n = normalize_symbol(preferred_symbol)
+    name_n = normalize_display_name(display_name)
     row = session.get(AssetIdentifier, isin_n)
     if row is None:
         row = AssetIdentifier(
             isin=isin_n,
             wkn=wkn_n,
             preferred_symbol=symbol_n,
+            display_name=name_n,
             paperless_doc_id=paperless_doc_id,
         )
         session.add(row)
@@ -126,6 +149,8 @@ def upsert_mapping(
             row.wkn = wkn_n
         if clear_missing or symbol_n is not None:
             row.preferred_symbol = symbol_n
+        if clear_missing or name_n is not None:
+            row.display_name = name_n
         if paperless_doc_id is not None:
             row.paperless_doc_id = paperless_doc_id
     session.flush()
@@ -155,6 +180,7 @@ def replace_mappings(session: Session, items: list[dict[str, Any]]) -> list[dict
             isin=isin_n,
             wkn=raw.get("wkn"),
             preferred_symbol=raw.get("preferred_symbol"),
+            display_name=raw.get("display_name"),
             paperless_doc_id=(
                 int(raw["paperless_doc_id"])
                 if raw.get("paperless_doc_id") is not None
@@ -393,12 +419,14 @@ def pick_display_id(
     wkn: str | None,
     isin: str | None,
     asset_key: str,
+    display_name: str | None = None,
 ) -> str:
     pref = preference if preference in ASSET_ID_PREFERENCES else DEFAULT_ASSET_ID_PREFERENCE
     chains: dict[str, list[str | None]] = {
-        "symbol": [symbol, isin, wkn, asset_key],
-        "wkn": [wkn, symbol, isin, asset_key],
-        "isin": [isin, symbol, wkn, asset_key],
+        "symbol": [symbol, display_name, isin, wkn, asset_key],
+        "wkn": [wkn, display_name, symbol, isin, asset_key],
+        "isin": [isin, display_name, symbol, wkn, asset_key],
+        "name": [display_name, symbol, isin, wkn, asset_key],
     }
     for value in chains[pref]:
         if value:
@@ -413,6 +441,7 @@ def enrich_asset_fields(
     symbol: str | None,
     wkn_by_isin: dict[str, str],
     preference: str,
+    display_name_by_isin: dict[str, str] | None = None,
 ) -> dict[str, str | None]:
     isin_code = resolve_isin_code(
         activity_isin=activity_isin,
@@ -424,17 +453,25 @@ def enrich_asset_fields(
         if key and key in wkn_by_isin:
             wkn = wkn_by_isin[key]
             break
+    name = None
+    names = display_name_by_isin or {}
+    for key in (isin_code, normalize_isin(asset_key)):
+        if key and key in names:
+            name = names[key]
+            break
     display_id = pick_display_id(
         preference=preference,
         symbol=symbol,
         wkn=wkn,
         isin=isin_code,
         asset_key=asset_key,
+        display_name=name,
     )
     return {
         "symbol": symbol,
         "wkn": wkn,
         "isin_code": isin_code,
+        "display_name": name,
         "display_id": display_id,
     }
 

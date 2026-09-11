@@ -272,6 +272,7 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
                 "symbol": lot.get("symbol"),
                 "wkn": lot.get("wkn"),
                 "isin_code": lot.get("isin_code"),
+                "display_name": lot.get("display_name"),
                 "display_id": lot.get("display_id") or key,
             }
     rows: list[dict] = []
@@ -288,6 +289,7 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
                 "symbol": ids.get("symbol"),
                 "wkn": ids.get("wkn"),
                 "isin_code": ids.get("isin_code"),
+                "display_name": ids.get("display_name"),
                 "display_id": ids.get("display_id") or key,
                 "open_qty": str(values["open_qty"]),
                 "invested": str(invested),

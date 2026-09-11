@@ -115,6 +115,7 @@ export type AssetIdentifierRow = {
   isin: string;
   wkn: string | null;
   preferred_symbol: string | null;
+  display_name: string | null;
   paperless_doc_id?: number | null;
   updated_at?: string | null;
 };
@@ -169,7 +170,7 @@ export type PortfolioSettings = {
   tax_allowance_eur: string;
   tax_warn_pct: string;
   risk_free_rate: string;
-  asset_id_preference: "symbol" | "wkn" | "isin";
+  asset_id_preference: "symbol" | "wkn" | "isin" | "name";
 };
 
 export type StagingSyncEvent = {
@@ -316,7 +317,7 @@ export const api = {
     tax_allowance_eur?: string;
     tax_warn_pct?: string;
     risk_free_rate?: string;
-    asset_id_preference?: "symbol" | "wkn" | "isin";
+    asset_id_preference?: "symbol" | "wkn" | "isin" | "name";
   }) =>
     request<PortfolioSettings>("/api/settings/portfolio", {
       method: "PUT",

@@ -70,7 +70,7 @@ Verkauf → verbrauchte Lots.
 | `metrics_daily` | Vorberechnete KPIs (nav, invested, mtd_return, ytd_return, …) |
 | `document_links` | Paperless-Dokument ↔ Activity/Lot |
 | `staging_imports` | Review-Queue vor Ghostfolio-Import |
-| `asset_identifiers` | ISIN → WKN / preferred_symbol (Tabelle SoT; WKN aus Paperless gelernt wenn leer) |
+| `asset_identifiers` | ISIN → WKN / preferred_symbol / display_name (Tabelle SoT; WKN gelernt wenn leer; Name nur manuell) |
 | `app_settings` | UI-Settings (z. B. Paperless Field-Map, Anzeige-Kennung) |
 | `sync_state` | Idempotenz, last_sync_at, cursor |
 
