@@ -148,7 +148,11 @@ Unvollst?ndige Felder werden ?bersprungen (`action=skipped`); manueller Sync ble
 
 | `POST` | `/api/staging/sync?mode=full` | Full Sync, NDJSON-Progress (`skip_reasons` im `done`) |
 
-| `POST` | `/api/staging/match-activities` | Manuell: Staging an bestehende Activities |
+| `POST` | `/api/staging/match-activities` | Unverknüpfte Lots → gefilterte Paperless-Docs |
+
+| `GET` | `/api/paperless/link-preview` | Scope-Preview (Count + Warnflags) |
+
+| `POST` | `/api/lots/{id}/link-document` | Manuell Beleg (ID/URL) an Lot |
 
 | `POST` | `/api/webhooks/paperless` | Auto-Ingest eines Docs |
 
