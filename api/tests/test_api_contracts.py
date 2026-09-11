@@ -138,6 +138,8 @@ def test_metrics_overview_periods_nav_positions(api_db) -> None:
     assert Decimal(body["nav"]) > 0
     assert Decimal(body["invested"]) == Decimal("2200")  # 10*100 + 10*120
     assert "periods" in body and len(body["periods"]) > 0
+    assert "annual_returns" in body and len(body["annual_returns"]) > 0
+    assert body["annual_returns"][0]["label"] == "ytd"
     assert "cagr" in body
     assert "mwr" in body
     assert "risk" in body

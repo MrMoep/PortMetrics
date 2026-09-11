@@ -466,6 +466,10 @@ button.linkish:hover {
     margin-top: 18px;
     margin-left: -8px;
   }
+
+  .pane-trail {
+    grid-column: 2;
+  }
 }
 
 .grid {

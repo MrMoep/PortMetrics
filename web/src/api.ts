@@ -9,6 +9,13 @@ export type Overview = {
     end_date: string;
     period_return: string | null;
   }>;
+  annual_returns?: Array<{
+    label: string;
+    start_date: string;
+    end_date: string;
+    year_return: string | null;
+    return_to_date: string | null;
+  }>;
   cagr: { cagr: string | null; years: string | null };
   mwr?: {
     irr: string | null;

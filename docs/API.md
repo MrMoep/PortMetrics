@@ -12,7 +12,7 @@ Basis-URL im Container: `http://host:8080`
 | `POST` | `/api/fifo/rebuild` | FIFO neu berechnen |
 | `GET` | `/api/lots` | Offene Lots (`?isin=`) |
 | `POST` | `/api/simulate/sell` | What-If Verkauf |
-| `GET` | `/api/metrics/overview` | Dashboard-Kennzahlen |
+| `GET` | `/api/metrics/overview` | Dashboard-Kennzahlen inkl. Perioden + Jahres-Renditen |
 | `GET` | `/api/metrics/periods` | Perioden + CAGR |
 | `GET` | `/api/metrics/nav` | NAV-Serie (`?start=&end=`) |
 | `POST` | `/api/metrics/rebuild` | `metrics_daily` neu |
