@@ -36,8 +36,10 @@ from portmetrics.paperless.staging import (
     resolve_legacy_tag_id,
 )
 
-# Exact auto-match only; no date window (ambiguous cases stay unmatched).
+# Price is exact within tolerance; dates allow ±1 day (Paperless created vs GF
+# trade_date are often skewed by one calendar day / timezone).
 PRICE_TOLERANCE = Decimal("0.01")
+DATE_TOLERANCE_DAYS = 1
 LINK_TYPE_MATCHED = "matched"
 LINK_TYPE_MANUAL = "manual"
 WARN_DOCUMENT_COUNT = 100
@@ -199,6 +201,25 @@ def _price_close(a: Decimal, b: Decimal) -> bool:
     return abs(a - b) <= PRICE_TOLERANCE
 
 
+def _date_distance(a: date, b: date) -> int:
+    return abs((a - b).days)
+
+
+def _date_close(a: date, b: date) -> bool:
+    return _date_distance(a, b) <= DATE_TOLERANCE_DAYS
+
+
+def _prefer_exact_dates(
+    candidates: list,
+    *,
+    trade_date: date,
+    get_date,
+) -> list:
+    """If any candidate shares the exact trade date, keep only those."""
+    exact = [row for row in candidates if get_date(row) == trade_date]
+    return exact if exact else candidates
+
+
 def _existing_doc_links(session: Session) -> set[int]:
     rows = session.scalars(select(DocumentLink.paperless_doc_id)).all()
     return {int(doc_id) for doc_id in rows if doc_id is not None}
@@ -294,7 +315,7 @@ def _find_candidate_activities(
             continue
         if str(activity.type).upper() != wp_typ:
             continue
-        if activity.trade_date != trade_date:
+        if not _date_close(activity.trade_date, trade_date):
             continue
         if Decimal(activity.quantity) != quantity:
             continue
@@ -302,6 +323,12 @@ def _find_candidate_activities(
             continue
         base.append(activity)
 
+    if not base:
+        return base
+
+    base = _prefer_exact_dates(
+        base, trade_date=trade_date, get_date=lambda row: row.trade_date
+    )
     if len(base) <= 1 or unit_price is None:
         return base
 
@@ -316,7 +343,7 @@ def _doc_matches_activity(
 ) -> bool:
     if str(activity.type).upper() != doc.wp_typ:
         return False
-    if activity.trade_date != doc.trade_date:
+    if not _date_close(activity.trade_date, doc.trade_date):
         return False
     if Decimal(activity.quantity) != doc.quantity:
         return False
@@ -431,10 +458,11 @@ def _load_doc_candidates(
 def match_lots_to_documents(session: Session, client: PaperlessClient) -> MatchResult:
     """Link unlinked FIFO lots to filtered Paperless docs when the match is unique.
 
-    For each unlinked lot, find docs with same type + identity + date + quantity
-    (unit_price breaks ties). Identity bridges Paperless ISIN/WKN to Ghostfolio
-    symbols via asset_identifiers. Only links when the lot has exactly one doc and
-    that doc has exactly one lot. Marks existing staging rows imported.
+    For each unlinked lot, find docs with same type + identity + quantity and a
+    trade date within ±1 day (unit_price / exact date break ties). Identity
+    bridges Paperless ISIN/WKN to Ghostfolio symbols via asset_identifiers. Only
+    links when the lot has exactly one doc and that doc has exactly one lot.
+    Marks existing staging rows imported.
     """
     docs = _load_doc_candidates(session, client)
     linked_docs = _existing_doc_links(session)
@@ -466,7 +494,13 @@ def match_lots_to_documents(session: Session, client: PaperlessClient) -> MatchR
             if not _doc_matches_activity(doc, activity, lookups):
                 continue
             matches.append(doc)
-        if len(matches) > 1 and matches[0].unit_price is not None:
+        if len(matches) > 1:
+            matches = _prefer_exact_dates(
+                matches,
+                trade_date=activity.trade_date,
+                get_date=lambda row: row.trade_date,
+            )
+        if len(matches) > 1 and activity.unit_price is not None:
             priced = [
                 d
                 for d in matches
@@ -494,7 +528,7 @@ def match_lots_to_documents(session: Session, client: PaperlessClient) -> MatchR
                     "lot_id": lot.id,
                     "activity_id": activity.id,
                     "outcome": "unmatched",
-                    "reason": "no document with same type/ISIN/date/quantity",
+                    "reason": "no document with same type/identity/date±1/quantity",
                 }
             )
             continue
@@ -739,7 +773,7 @@ def match_staging_to_activities(session: Session) -> MatchResult:
                     "staging_id": row.id,
                     "paperless_doc_id": row.paperless_doc_id,
                     "outcome": "unmatched",
-                    "reason": "no activity with same type/ISIN/date/quantity",
+                    "reason": "no activity with same type/identity/date±1/quantity",
                 }
             )
             continue

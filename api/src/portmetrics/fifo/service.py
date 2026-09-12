@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from portmetrics.assets.identifiers import (
@@ -47,6 +47,9 @@ def asset_key_for(activity: Activity) -> str:
 
 def rebuild_lots(session: Session) -> RebuildResult:
     """Full rebuild of lots/consumptions from activities (deterministic)."""
+    # Document links keep activity_id; clear lot_id so DELETE FROM lots can run,
+    # then reattach after new lot ids exist.
+    session.execute(update(DocumentLink).values(lot_id=None))
     session.execute(delete(LotConsumption))
     session.execute(delete(Lot))
     session.flush()
@@ -120,11 +123,27 @@ def rebuild_lots(session: Session) -> RebuildResult:
         # DIVIDEND/FEE/INTEREST ignored for lot tracking in v1
 
     session.flush()
+    _reattach_document_link_lots(session, lot_rows)
     return RebuildResult(
         lots_created=len(lot_rows),
         consumptions=consumptions,
         activities_processed=len(activities),
     )
+
+
+def _reattach_document_link_lots(
+    session: Session,
+    lot_rows: dict[int, Lot],
+) -> None:
+    """Restore document_links.lot_id from activity_id after a FIFO rebuild."""
+    links = session.scalars(
+        select(DocumentLink).where(DocumentLink.activity_id.is_not(None))
+    ).all()
+    for link in links:
+        lot = lot_rows.get(int(link.activity_id))
+        if lot is not None:
+            link.lot_id = lot.id
+    session.flush()
 
 
 def latest_mark_price(session: Session, asset_key: str) -> Decimal | None:

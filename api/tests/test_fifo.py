@@ -5,9 +5,10 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from portmetrics.db.models import Activity
+from portmetrics.db.models import Activity, DocumentLink, Lot
 from portmetrics.fifo.engine import FifoError, apply_sell, create_lot_from_buy, estimate_tax
 from portmetrics.fifo.service import list_open_lots, rebuild_lots, simulate_sell
 
@@ -247,3 +248,35 @@ def test_rebuild_lots_and_simulate(db_session: Session) -> None:
     assert len(sim["lots"]) == 1
     assert sim["lots"][0]["buy_activity_id"] is not None
     assert Decimal(sim["estimated_tax"]) > 0
+
+
+def test_rebuild_reattaches_document_links(db_session: Session) -> None:
+    buy = _buy(db_session, qty="10", price="100", day=date(2023, 1, 1))
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 1
+    lot = db_session.scalar(select(Lot).where(Lot.activity_id == buy.id))
+    assert lot is not None
+    old_lot_id = lot.id
+    db_session.add(
+        DocumentLink(
+            paperless_doc_id=42,
+            activity_id=buy.id,
+            lot_id=old_lot_id,
+            link_type="matched",
+        )
+    )
+    db_session.flush()
+
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 1
+    new_lot = db_session.scalar(select(Lot).where(Lot.activity_id == buy.id))
+    assert new_lot is not None
+    assert new_lot.id != old_lot_id
+    link = db_session.scalar(
+        select(DocumentLink).where(DocumentLink.paperless_doc_id == 42)
+    )
+    assert link is not None
+    assert link.activity_id == buy.id
+    assert link.lot_id == new_lot.id
+    listed = list_open_lots(db_session, asset_key="IE00BK5BQT80")
+    assert listed[0]["paperless_doc_id"] == 42

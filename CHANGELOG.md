@@ -18,7 +18,8 @@
 - Paperless-Sync: Skip-Gründe aggregiert (Log + Statuszeile); Select-Feld `Typ` und WKN-only Docs werden akzeptiert
 - Paperless Select-`Typ`: Option-IDs (`SXXG…`) werden über Custom-Field-Definition auf Labels (`BUY`/…) gemappt
 - Belege-Verknüpfen: Identity-Match über Kennungs-Tabelle (Paperless-ISIN/WKN ↔ Ghostfolio preferred_symbol)
-### Changed
+- Belege-Verknüpfen: Datums-Toleranz ±1 Tag (Paperless-`created` oft einen Kalendertag neben GF-Handelsdatum)
+- FIFO-Rebuild: `document_links.lot_id` vor Lot-DELETE lösen und nach Rebuild per `activity_id` neu setzen (behebt Stunden-Sync-FK-Fehler)### Changed
 - Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`
 - Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Ghostfolio-Import-Symbol = preferred_symbol (nicht roh ISIN)
 - Typ `OTHER` im Staging sichtbar, Confirm gesperrt; kein Paperless-Write-back für Import-Status/Activity-ID
