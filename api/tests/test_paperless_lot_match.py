@@ -299,3 +299,45 @@ def test_match_lots_without_mapping_stays_unmatched(db_session) -> None:
     result = match_lots_to_documents(db_session, _client([_doc(55)]))
     assert result.matched == 0
     assert result.unmatched == 1
+
+
+def test_match_lots_allows_one_day_date_skew(db_session) -> None:
+    """Paperless created date is often +1 calendar day vs Ghostfolio trade_date."""
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    activity = _activity(
+        isin="VGWL.DE",
+        symbol="VGWL.DE",
+        trade_date=date(2024, 6, 1),
+    )
+    db_session.add(activity)
+    db_session.flush()
+    db_session.add(
+        Lot(
+            activity_id=activity.id,
+            isin="VGWL.DE",
+            open_qty=Decimal("10"),
+            original_qty=Decimal("10"),
+            cost_basis=Decimal("1006.50"),
+            open_date=date(2024, 6, 1),
+            status=LotStatus.OPEN,
+        )
+    )
+    upsert_mapping(
+        db_session,
+        isin="IE00BK5BQT80",
+        preferred_symbol="VGWL.DE",
+    )
+    save_paperless_settings(
+        db_session,
+        {"field_map": {"type": 1, "isin": 2, "wkn": 3, "quantity": 4, "unit_price": 5, "fee": 6}},
+    )
+    db_session.flush()
+
+    doc = _doc(77)
+    doc["created"] = "2024-06-02T08:00:00.000Z"
+    result = match_lots_to_documents(db_session, _client([doc]))
+    assert result.matched == 1
+    link = db_session.scalar(select(DocumentLink))
+    assert link is not None
+    assert link.paperless_doc_id == 77

@@ -736,6 +736,14 @@ def staging_match_activities(db: Session = Depends(get_db)) -> dict:
             status_code=502 if isinstance(exc, PaperlessError) else 400,
             detail=str(exc),
         ) from exc
+    logger.info(
+        "paperless lot match: scanned=%s matched=%s ambiguous=%s unmatched=%s skipped=%s",
+        result.scanned,
+        result.matched,
+        result.ambiguous,
+        result.unmatched,
+        result.skipped,
+    )
     return {
         "scanned": result.scanned,
         "matched": result.matched,
