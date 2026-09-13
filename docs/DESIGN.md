@@ -62,6 +62,7 @@ Hintergrund zusätzlich: **24px-Raster** über halbtransparente Linien (`--grid-
 | Workspace | `.workspace`, `.workspace-sim` | Split ab ~900px; Simulator enger links |
 | Offset-Pane | `.pane-offset` | Leichter Versatz des Nebenpanels (Desktop) |
 | KPI | `.stat`, `.stat-hero` | Harte Kacheln; Hero spannt volle Breite |
+| Panel-Action | `button.panel-action` | Unauffälliger Mono-Text neben Panel-Label (z. B. Kennzahlen → Anpassen) |
 | Werte | `.val-pos`, `.val-neg` | Vorzeichenfarbe |
 | Tabelle | `table`, `.table-wrap` | Sichtbare Zellgrenzen, Mono-Header |
 | Formulare | `.form`, `.form-wide`, `.form-filters` | Mono-Labels Uppercase; Filter-Form breiter |

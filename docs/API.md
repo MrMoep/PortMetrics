@@ -25,6 +25,8 @@ Basis-URL im Container: `http://host:8080`
 | `POST` | `/api/staging/{id}/confirm` | Import nach Ghostfolio + stiller Mirror (best-effort) |
 | `POST` | `/api/staging/{id}/reject` | Staging ablehnen |
 | `POST` | `/api/webhooks/paperless` | Paperless Auto-Ingest (Shared Secret) |
+| `GET`/`PUT` | `/api/settings/portfolio` | Steuer-Freibetrag, Risikofrei-Zins, Anzeige-Kennung |
+| `GET`/`PUT` | `/api/settings/overview` | Overview-KPI-Layout (`kpi_ids`, `hero_id`) |
 | `GET`/`PUT` | `/api/settings/assets` | Kennungs-Tabelle ISIN/WKN/preferred_symbol/display_name |
 | `POST` | `/api/settings/assets/apply-suggestion` | Historien-Vorschlag in Tabelle übernehmen |
 | `GET`/`PUT` | `/api/settings/paperless` | Paperless-Mapping / Tag / GF-Defaults |

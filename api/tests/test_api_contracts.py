@@ -228,6 +228,43 @@ def test_portfolio_settings_api_roundtrip(api_db) -> None:
     assert bad.status_code == 400
 
 
+def test_overview_settings_api_roundtrip(api_db) -> None:
+    client, _SessionLocal = api_db
+
+    get_resp = client.get("/api/settings/overview")
+    assert get_resp.status_code == 200
+    defaults = get_resp.json()
+    assert defaults["hero_id"] == "nav"
+    assert defaults["kpi_ids"][0] == "nav"
+    assert "irr_mwr" in defaults["kpi_ids"]
+
+    put_resp = client.put(
+        "/api/settings/overview",
+        json={
+            "kpi_ids": ["tax_allowance_remaining", "nav", "unknown_metric", "nav"],
+            "hero_id": "tax_allowance_remaining",
+        },
+    )
+    assert put_resp.status_code == 200
+    saved = put_resp.json()
+    assert saved["kpi_ids"] == ["tax_allowance_remaining", "nav"]
+    assert saved["hero_id"] == "tax_allowance_remaining"
+    assert client.get("/api/settings/overview").json()["hero_id"] == "tax_allowance_remaining"
+
+    # Hero not in visible list → first visible
+    fixed = client.put(
+        "/api/settings/overview",
+        json={"kpi_ids": ["invested", "cagr"], "hero_id": "nav"},
+    )
+    assert fixed.status_code == 200
+    assert fixed.json()["hero_id"] == "invested"
+
+    # Empty list → defaults
+    empty = client.put("/api/settings/overview", json={"kpi_ids": [], "hero_id": "nav"})
+    assert empty.status_code == 200
+    assert empty.json()["kpi_ids"][0] == "nav"
+
+
 def test_staging_confirm_runs_silent_mirror(api_db, monkeypatch) -> None:
     """Confirm imports to GF, then best-effort mirrors so Lots refresh without manual Sync."""
     from unittest.mock import MagicMock
