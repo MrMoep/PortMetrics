@@ -194,6 +194,11 @@ export type PortfolioSettings = {
   asset_id_preference: "symbol" | "wkn" | "isin" | "name";
 };
 
+export type OverviewSettings = {
+  kpi_ids: string[];
+  hero_id: string;
+};
+
 export type StagingSyncEvent = {
   event: string;
   scanned?: number;
@@ -359,6 +364,12 @@ export const api = {
     asset_id_preference?: "symbol" | "wkn" | "isin" | "name";
   }) =>
     request<PortfolioSettings>("/api/settings/portfolio", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  overviewSettings: () => request<OverviewSettings>("/api/settings/overview"),
+  saveOverviewSettings: (body: { kpi_ids?: string[]; hero_id?: string }) =>
+    request<OverviewSettings>("/api/settings/overview", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

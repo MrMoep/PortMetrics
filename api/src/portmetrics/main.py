@@ -68,6 +68,7 @@ from portmetrics.paperless.staging import (
     sync_paperless_documents,
 )
 from portmetrics.scheduler import start_scheduler, stop_scheduler
+from portmetrics.settings.overview import get_overview_settings, save_overview_settings
 from portmetrics.settings.portfolio import get_portfolio_settings, save_portfolio_settings
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE
 from portmetrics.sync.mirror import sync_ghostfolio_mirror
@@ -505,6 +506,19 @@ def settings_portfolio_get(db: Session = Depends(get_db)) -> dict:
 def settings_portfolio_put(payload: dict, db: Session = Depends(get_db)) -> dict:
     try:
         return save_portfolio_settings(db, payload)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/settings/overview")
+def settings_overview_get(db: Session = Depends(get_db)) -> dict:
+    return get_overview_settings(db)
+
+
+@app.put("/api/settings/overview")
+def settings_overview_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        return save_overview_settings(db, payload if isinstance(payload, dict) else {})
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

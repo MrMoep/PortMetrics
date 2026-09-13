@@ -4,6 +4,7 @@ import {
   AssetIdentifierRow,
   Lot,
   Overview,
+  OverviewSettings,
   PaperlessField,
   PaperlessIdName,
   PaperlessSettings,
@@ -11,6 +12,15 @@ import {
   StagingItem,
   VersionInfo,
 } from "./api";
+import {
+  DEFAULT_KPI_IDS,
+  KPI_BY_ID,
+  defaultOverviewLayout,
+  editorOrder,
+  normalizeOverviewLayout,
+  type OverviewKpiId,
+  type OverviewLayout,
+} from "./overviewKpis";
 import {
   SETTINGS_SECTIONS,
   money,
@@ -145,19 +155,6 @@ const FALLBACK_ROLE_META: Array<{
 ];
 
 const METRIC_HINTS: Record<string, string> = {
-  nav: "Nettoinventarwert — aktueller Marktwert aller offenen Positionen.",
-  invested: "Summe der Einstandswerte (offene Lots × Stückkosten).",
-  unrealized: "Buchgewinn/-verlust: Marktwert minus Investiert.",
-  cagr: "Jährlich annualisierte Rendite über die gesamte Haltedauer.",
-  irr: "Geldgewichtete interne Verzinsung (IRR/MWR) inkl. Trades, Dividenden, Zinsen und End-NAV.",
-  simple: "Einfache Gesamtrendite: (Endwert − Kapitaleinsatz) / Kapitaleinsatz.",
-  maxdd: "Größter Kursrückgang vom Zwischenhoch zum folgenden Tief.",
-  vol: "Annualisierte Schwankungsbreite der Periodenrenditen.",
-  sharpe: "Überrendite je Einheit Risiko (vs. risikofreiem Zinssatz).",
-  tax: "Verbleibender steuerlicher Freibetrag im laufenden Jahr (nach realisierten Gewinnen, Dividenden und Zinsen).",
-  dividendsYtd: "Brutto-Dividenden im laufenden Kalenderjahr.",
-  interestYtd: "Brutto-Zinsen (INTEREST) im laufenden Kalenderjahr.",
-  dividends: "Summe aller erhaltenen Dividenden (gesamter Zeitraum).",
   cashflowFilter: "Alle = Kapital + Erträge; Kapital = BUY/SELL; Erträge = DIVIDEND/INTEREST.",
   yearClose:
     "Kalenderjahr-Rendite: Jahresanfang (bzw. erster Trade) bis Jahresschluss — bei YTD bis heute.",
@@ -194,12 +191,14 @@ function SortHeader({
 function Panel({
   label,
   meta,
+  actions,
   children,
   className = "",
   offset = false,
 }: {
   label: string;
   meta?: string;
+  actions?: ReactNode;
   children: ReactNode;
   className?: string;
   offset?: boolean;
@@ -207,12 +206,37 @@ function Panel({
   return (
     <section className={`panel ${offset ? "pane-offset" : ""} ${className}`.trim()}>
       <div className="panel-head">
-        <p className="panel-label">{label}</p>
+        <div className="panel-head-start">
+          <p className="panel-label">{label}</p>
+          {actions}
+        </div>
         {meta ? <p className="panel-label">{meta}</p> : null}
       </div>
       <div className="panel-body">{children}</div>
     </section>
   );
+}
+
+function formatKpiDisplay(
+  id: OverviewKpiId,
+  overview: Overview,
+  showMode: boolean,
+): { label: string; hint: string; text: string; className: string } {
+  const def = KPI_BY_ID[id];
+  const raw = def.value(overview);
+  const label = `${def.label}${def.labelExtra?.(overview) ?? ""}`;
+  let text: string;
+  if (def.format === "money") text = money(raw, showMode);
+  else if (def.format === "pct") text = pct(raw, showMode);
+  else text = ratio(raw, showMode);
+
+  let className = "mono";
+  if (!showMode && def.warnNeg?.(overview)) {
+    className += " val-neg";
+  } else if (def.signed) {
+    className += ` ${signedClass(raw, showMode)}`;
+  }
+  return { label, hint: def.hint, text, className };
 }
 
 type IconName = "sync" | "fifo" | "metrics" | "paperless" | "refresh" | "eye" | "eye-off";
@@ -405,25 +429,36 @@ export default function App() {
   const [linkDocRef, setLinkDocRef] = useState("");
   /** Presentation mode: zero displayed money/pct/qty (display-only, data still loaded). */
   const [showMode, setShowMode] = useState(false);
+  const [overviewLayout, setOverviewLayout] = useState<OverviewLayout>(() => defaultOverviewLayout());
+  const [kpiEditOpen, setKpiEditOpen] = useState(false);
+  const [kpiEditOrder, setKpiEditOrder] = useState<OverviewKpiId[]>(() => [...DEFAULT_KPI_IDS]);
+  const [kpiEditVisible, setKpiEditVisible] = useState<Set<OverviewKpiId>>(
+    () => new Set(DEFAULT_KPI_IDS),
+  );
+  const [kpiEditHero, setKpiEditHero] = useState<OverviewKpiId>("nav");
+  const [kpiEditSaving, setKpiEditSaving] = useState(false);
 
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [ov, lotData, stagingData, versionInfo, portfolio, paperless, assets] = await Promise.all([
-        api.overview(),
-        api.lots(),
-        api.staging(),
-        api.version().catch(() => FALLBACK_VERSION),
-        api.portfolioSettings().catch(() => null),
-        api.paperlessSettings().catch(() => null),
-        api.assetIdentifiers().catch(() => ({ items: [] as AssetIdentifierRow[] })),
-      ]);
+      const [ov, lotData, stagingData, versionInfo, portfolio, paperless, assets, overviewPrefs] =
+        await Promise.all([
+          api.overview(),
+          api.lots(),
+          api.staging(),
+          api.version().catch(() => FALLBACK_VERSION),
+          api.portfolioSettings().catch(() => null),
+          api.paperlessSettings().catch(() => null),
+          api.assetIdentifiers().catch(() => ({ items: [] as AssetIdentifierRow[] })),
+          api.overviewSettings().catch(() => null as OverviewSettings | null),
+        ]);
       setOverview(ov);
       setLots(lotData.lots);
       setStaging(stagingData.items);
       setVersion(versionInfo);
       setAssetRows(assets.items);
       setAssetDraft(assets.items.map((row) => ({ ...row })));
+      setOverviewLayout(normalizeOverviewLayout(overviewPrefs));
       if (portfolio) {
         setPortfolioSettings(portfolio);
         setAssetIdPrefDraft(portfolio.asset_id_preference || "symbol");
@@ -851,6 +886,68 @@ export default function App() {
     }
   }
 
+  function openKpiEditor() {
+    const layout = overviewLayout;
+    setKpiEditOrder(editorOrder(layout));
+    setKpiEditVisible(new Set(layout.kpi_ids));
+    setKpiEditHero(layout.hero_id);
+    setKpiEditOpen(true);
+  }
+
+  function moveKpiEdit(id: OverviewKpiId, dir: -1 | 1) {
+    setKpiEditOrder((prev) => {
+      const idx = prev.indexOf(id);
+      const nextIdx = idx + dir;
+      if (idx < 0 || nextIdx < 0 || nextIdx >= prev.length) return prev;
+      const copy = [...prev];
+      const tmp = copy[idx];
+      copy[idx] = copy[nextIdx];
+      copy[nextIdx] = tmp;
+      return copy;
+    });
+  }
+
+  function toggleKpiVisible(id: OverviewKpiId) {
+    setKpiEditVisible((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        if (next.size <= 1) return prev;
+        next.delete(id);
+        setKpiEditHero((hero) => (hero === id ? ([...next][0] as OverviewKpiId) : hero));
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  async function saveKpiLayout(layout: OverviewLayout) {
+    setKpiEditSaving(true);
+    setError("");
+    try {
+      const saved = await api.saveOverviewSettings(layout);
+      const normalized = normalizeOverviewLayout(saved);
+      setOverviewLayout(normalized);
+      setKpiEditOpen(false);
+      setStatus("Kennzahlen-Layout gespeichert");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setKpiEditSaving(false);
+    }
+  }
+
+  async function onSaveKpiEdit() {
+    const kpi_ids = kpiEditOrder.filter((id) => kpiEditVisible.has(id));
+    if (kpi_ids.length === 0) return;
+    const hero_id = kpi_ids.includes(kpiEditHero) ? kpiEditHero : kpi_ids[0];
+    await saveKpiLayout({ kpi_ids, hero_id });
+  }
+
+  async function onResetKpiEdit() {
+    await saveKpiLayout(defaultOverviewLayout());
+  }
+
   async function confirmPaperlessScope(actionLabel: string): Promise<boolean> {
     setStatus(`${actionLabel}: Scope prüfen…`);
     const preview = await api.paperlessLinkPreview();
@@ -1072,78 +1169,30 @@ export default function App() {
 
       {tab === "overview" && overview && (
         <div className="workspace">
-          <Panel label="Kennzahlen" meta={`AS OF ${overview.as_of}`}>
+          <Panel
+            label="Kennzahlen"
+            meta={`AS OF ${overview.as_of}`}
+            actions={
+              <button type="button" className="panel-action" onClick={openKpiEditor}>
+                Anpassen
+              </button>
+            }
+          >
             <div className="grid">
-              <div className="stat stat-hero" title={METRIC_HINTS.nav}>
-                <span>NAV</span>
-                <strong className="mono">{money(overview.nav, showMode)}</strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.invested}>
-                <span>Investiert</span>
-                <strong className="mono">{money(overview.invested, showMode)}</strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.unrealized}>
-                <span>Unrealisiert</span>
-                <strong className={`mono ${signedClass(overview.unrealized_gain, showMode)}`}>
-                  {money(overview.unrealized_gain, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.cagr}>
-                <span>CAGR</span>
-                <strong className={`mono ${signedClass(overview.cagr.cagr, showMode)}`}>
-                  {pct(overview.cagr.cagr, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.irr}>
-                <span>IRR (MWR)</span>
-                <strong className={`mono ${signedClass(overview.mwr?.irr, showMode)}`}>
-                  {pct(overview.mwr?.irr, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.simple}>
-                <span>Einfache Rendite</span>
-                <strong className={`mono ${signedClass(overview.mwr?.simple_return, showMode)}`}>
-                  {pct(overview.mwr?.simple_return, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.maxdd}>
-                <span>Max Drawdown</span>
-                <strong className={`mono ${signedClass(overview.risk?.max_drawdown, showMode)}`}>
-                  {pct(overview.risk?.max_drawdown, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.vol}>
-                <span>Volatilität</span>
-                <strong className="mono">{pct(overview.risk?.volatility, showMode)}</strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.sharpe}>
-                <span>Sharpe</span>
-                <strong className={`mono ${signedClass(overview.risk?.sharpe, showMode)}`}>
-                  {ratio(overview.risk?.sharpe, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.tax}>
-                <span>Freibetrag rest ({overview.tax_allowance?.year ?? "—"})</span>
-                <strong
-                  className={`mono ${showMode ? "" : overview.tax_allowance?.warn ? "val-neg" : signedClass(overview.tax_allowance?.remaining)}`}
-                >
-                  {money(overview.tax_allowance?.remaining, showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.dividendsYtd}>
-                <span>Dividenden YTD ({overview.dividends.year ?? overview.tax_allowance?.year ?? "—"})</span>
-                <strong className="mono">{money(overview.dividends.ytd ?? "0", showMode)}</strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.interestYtd}>
-                <span>Zinsen YTD</span>
-                <strong className="mono">
-                  {money(overview.dividends.interest_ytd ?? "0", showMode)}
-                </strong>
-              </div>
-              <div className="stat" title={METRIC_HINTS.dividends}>
-                <span>Dividenden gesamt</span>
-                <strong className="mono">{money(overview.dividends.total, showMode)}</strong>
-              </div>
+              {overviewLayout.kpi_ids.map((id) => {
+                const display = formatKpiDisplay(id, overview, showMode);
+                const isHero = id === overviewLayout.hero_id;
+                return (
+                  <div
+                    key={id}
+                    className={`stat${isHero ? " stat-hero" : ""}`}
+                    title={display.hint}
+                  >
+                    <span>{display.label}</span>
+                    <strong className={display.className}>{display.text}</strong>
+                  </div>
+                );
+              })}
             </div>
             {overview.tax_allowance?.warn ? (
               <p className="status error" style={{ marginTop: "0.75rem" }}>
@@ -2120,6 +2169,89 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {kpiEditOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!kpiEditSaving) setKpiEditOpen(false);
+          }}
+        >
+          <div
+            className="modal-panel modal-wide"
+            role="dialog"
+            aria-labelledby="kpi-edit-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="kpi-edit-title">Kennzahlen anpassen</h3>
+            <p className="muted">
+              Sichtbarkeit und Reihenfolge. Hero = volle Breite. Mindestens eine Kennzahl sichtbar.
+            </p>
+            <div className="kpi-edit-list">
+              {kpiEditOrder.map((id, index) => {
+                const def = KPI_BY_ID[id];
+                const visible = kpiEditVisible.has(id);
+                return (
+                  <div key={id} className="kpi-edit-row">
+                    <input
+                      type="radio"
+                      name="kpi-hero"
+                      title="Als Hero"
+                      checked={kpiEditHero === id}
+                      disabled={!visible}
+                      onChange={() => setKpiEditHero(id)}
+                      aria-label={`${def.label} als Hero`}
+                    />
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={visible}
+                        onChange={() => toggleKpiVisible(id)}
+                      />
+                      <span>{def.label}</span>
+                    </label>
+                    <div className="row-actions">
+                      <button
+                        type="button"
+                        disabled={index === 0}
+                        onClick={() => moveKpiEdit(id, -1)}
+                        aria-label={`${def.label} nach oben`}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        disabled={index === kpiEditOrder.length - 1}
+                        onClick={() => moveKpiEdit(id, 1)}
+                        aria-label={`${def.label} nach unten`}
+                      >
+                        ▼
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="row-actions">
+              <button
+                className="primary"
+                type="button"
+                disabled={kpiEditSaving || kpiEditVisible.size === 0}
+                onClick={() => void onSaveKpiEdit()}
+              >
+                Speichern
+              </button>
+              <button type="button" disabled={kpiEditSaving} onClick={() => void onResetKpiEdit()}>
+                Standard
+              </button>
+              <button type="button" disabled={kpiEditSaving} onClick={() => setKpiEditOpen(false)}>
+                Abbrechen
+              </button>
+            </div>
           </div>
         </div>
       )}
