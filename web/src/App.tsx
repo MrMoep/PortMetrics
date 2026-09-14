@@ -136,7 +136,7 @@ function SyncFilterPicker({
 
 const FALLBACK_VERSION: VersionInfo = {
   name: "PortMetrics",
-  version: "0.2.0",
+  version: "1.0.0",
   repository: "https://github.com/MrMoep/PortMetrics",
 };
 

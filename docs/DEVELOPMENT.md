@@ -95,9 +95,9 @@ Produktiv: dieselbe Migration gegen `portmetrics` (`APP_ENV=production`).
 ## Image-Tags
 
 - `ghcr.io/mrmoep/portmetrics:latest` — Push auf `main`
-- `ghcr.io/mrmoep/portmetrics:dev` — Push auf `dev` (Test-Image; UI zeigt `0.2.0-dev · <Build-Zeit>`)
+- `ghcr.io/mrmoep/portmetrics:dev` — Push auf `dev` (Test-Image; UI zeigt `1.0.0-dev · <Build-Zeit>`)
 - `ghcr.io/mrmoep/portmetrics:<git-sha>` — jeder Image-Build
-- `ghcr.io/mrmoep/portmetrics:0.2.0` — bei Tag `v0.2.0`
+- `ghcr.io/mrmoep/portmetrics:1.0.0` — bei Tag `v1.0.0`
 
 ## Versionierung
 
