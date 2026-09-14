@@ -31,6 +31,7 @@ from portmetrics.db.models import Activity, SyncState
 from portmetrics.db.session import get_session_factory
 from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import list_open_lots, rebuild_lots, simulate_sell
+from portmetrics.fifo.transfers import create_transfer, delete_transfer, list_transfers
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.logging_setup import configure_logging
 from portmetrics.metrics.periods import (
@@ -222,6 +223,50 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
     }
 
 
+@app.get("/api/transfers")
+def get_transfers(db: Session = Depends(get_db)) -> dict:
+    rows = list_transfers(db)
+    return {"count": len(rows), "transfers": rows}
+
+
+@app.post("/api/transfers")
+def post_transfer(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        from_account_id = str(payload["from_account_id"])
+        to_account_id = str(payload["to_account_id"])
+        isin = str(payload["isin"])
+        quantity = Decimal(str(payload["quantity"]))
+        transfer_date = date.fromisoformat(str(payload["transfer_date"]))
+        comment = payload.get("comment")
+        if comment is not None:
+            comment = str(comment)
+    except (KeyError, Exception) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {exc}") from exc
+    try:
+        return create_transfer(
+            db,
+            from_account_id=from_account_id,
+            to_account_id=to_account_id,
+            isin=isin,
+            quantity=quantity,
+            transfer_date=transfer_date,
+            comment=comment,
+        )
+    except FifoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/transfers/{transfer_id}")
+def remove_transfer(transfer_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        deleted = delete_transfer(db, transfer_id)
+    except FifoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    return {"deleted": True, "id": transfer_id}
+
+
 @app.post("/api/fifo/rebuild")
 def fifo_rebuild(db: Session = Depends(get_db)) -> dict:
     try:
@@ -232,6 +277,7 @@ def fifo_rebuild(db: Session = Depends(get_db)) -> dict:
         "lots_created": result.lots_created,
         "consumptions": result.consumptions,
         "activities_processed": result.activities_processed,
+        "transfers_applied": result.transfers_applied,
     }
 
 

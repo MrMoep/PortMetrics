@@ -16,6 +16,7 @@ from portmetrics.assets.identifiers import (
 from portmetrics.db.models import (
     Account,
     Activity,
+    DepotTransfer,
     DocumentLink,
     Lot,
     LotConsumption,
@@ -28,6 +29,7 @@ from portmetrics.fifo.engine import (
     LotState,
     SellResult,
     apply_sell,
+    apply_transfer,
     create_lot_from_buy,
     estimate_tax,
     normalize_account_id,
@@ -42,14 +44,40 @@ class RebuildResult:
     lots_created: int
     consumptions: int
     activities_processed: int
+    transfers_applied: int = 0
 
 
 def asset_key_for(activity: Activity) -> str:
     return activity.isin or activity.symbol
 
 
+def _persist_lot(session: Session, state: LotState) -> Lot:
+    account_id = None if state.account_id == UNASSIGNED_ACCOUNT_ID else state.account_id
+    row = Lot(
+        activity_id=state.activity_id,
+        account_id=account_id,
+        isin=state.asset_key,
+        open_qty=state.open_qty,
+        original_qty=state.original_qty,
+        cost_basis=state.cost_basis,
+        open_date=state.open_date,
+        status=state.status,
+        closed_at=state.closed_at,
+    )
+    session.add(row)
+    session.flush()
+    state.id = row.id
+    return row
+
+
+def _sync_lot_row(row: Lot, state: LotState) -> None:
+    row.open_qty = state.open_qty
+    row.status = state.status
+    row.closed_at = state.closed_at
+
+
 def rebuild_lots(session: Session) -> RebuildResult:
-    """Full rebuild of lots/consumptions from activities (deterministic)."""
+    """Full rebuild of lots/consumptions from activities + depot transfers."""
     # Document links keep activity_id; clear lot_id so DELETE FROM lots can run,
     # then reattach after new lot ids exist.
     session.execute(update(DocumentLink).values(lot_id=None))
@@ -60,96 +88,134 @@ def rebuild_lots(session: Session) -> RebuildResult:
     activities = session.scalars(
         select(Activity).order_by(Activity.trade_date.asc(), Activity.id.asc())
     ).all()
+    transfers = session.scalars(
+        select(DepotTransfer).order_by(
+            DepotTransfer.transfer_date.asc(), DepotTransfer.id.asc()
+        )
+    ).all()
+
+    # Same calendar day: all activities first, then transfers.
+    events: list[tuple[date, int, int, str, Activity | DepotTransfer]] = []
+    for activity in activities:
+        events.append((activity.trade_date, 0, activity.id, "activity", activity))
+    for transfer in transfers:
+        events.append((transfer.transfer_date, 1, transfer.id, "transfer", transfer))
+    events.sort(key=lambda item: (item[0], item[1], item[2]))
 
     open_lots: list[LotState] = []
-    lot_rows: dict[int, Lot] = {}  # activity_id -> Lot ORM for open buys
+    lots_by_id: dict[int, Lot] = {}
     consumptions = 0
+    transfers_applied = 0
 
-    for activity in activities:
-        key = asset_key_for(activity)
-        account_id = normalize_account_id(activity.account_id)
-        if activity.type == "BUY":
-            state = create_lot_from_buy(
-                activity_id=activity.id,
-                asset_key=key,
-                quantity=activity.quantity,
-                unit_price=activity.unit_price,
-                fee=activity.fee,
-                trade_date=activity.trade_date,
-                account_id=account_id,
-            )
-            row = Lot(
-                activity_id=activity.id,
-                account_id=None if account_id == UNASSIGNED_ACCOUNT_ID else account_id,
-                isin=key,
-                open_qty=state.open_qty,
-                original_qty=state.original_qty,
-                cost_basis=state.cost_basis,
-                open_date=state.open_date,
-                status=LotStatus.OPEN,
-            )
-            session.add(row)
-            session.flush()
-            state.id = row.id
-            open_lots.append(state)
-            lot_rows[activity.id] = row
-        elif activity.type == "SELL":
-            result = apply_sell(
-                open_lots,
-                asset_key=key,
-                quantity=activity.quantity,
-                unit_price=activity.unit_price,
-                fee=activity.fee,
-                trade_date=activity.trade_date,
-                account_id=account_id,
-            )
-            for c in result.consumptions:
-                # find lot row by activity_id of the buy
-                buy_lot = lot_rows.get(c.lot_activity_id)
-                if buy_lot is None:
-                    raise FifoError(f"Missing lot for buy activity {c.lot_activity_id}")
-                session.add(
-                    LotConsumption(
-                        sell_activity_id=activity.id,
-                        lot_id=buy_lot.id,
-                        qty_consumed=c.qty_consumed,
-                        proceeds=c.proceeds,
-                        realized_gain=c.realized_gain,
+    for _day, _kind, _eid, etype, payload in events:
+        if etype == "activity":
+            activity = payload  # type: ignore[assignment]
+            assert isinstance(activity, Activity)
+            key = asset_key_for(activity)
+            account_id = normalize_account_id(activity.account_id)
+            if activity.type == "BUY":
+                state = create_lot_from_buy(
+                    activity_id=activity.id,
+                    asset_key=key,
+                    quantity=activity.quantity,
+                    unit_price=activity.unit_price,
+                    fee=activity.fee,
+                    trade_date=activity.trade_date,
+                    account_id=account_id,
+                )
+                row = _persist_lot(session, state)
+                open_lots.append(state)
+                lots_by_id[row.id] = row
+            elif activity.type == "SELL":
+                result = apply_sell(
+                    open_lots,
+                    asset_key=key,
+                    quantity=activity.quantity,
+                    unit_price=activity.unit_price,
+                    fee=activity.fee,
+                    trade_date=activity.trade_date,
+                    account_id=account_id,
+                )
+                for c in result.consumptions:
+                    if c.lot_id is None or c.lot_id not in lots_by_id:
+                        raise FifoError(
+                            f"Missing lot for buy activity {c.lot_activity_id}"
+                        )
+                    buy_lot = lots_by_id[c.lot_id]
+                    session.add(
+                        LotConsumption(
+                            sell_activity_id=activity.id,
+                            lot_id=buy_lot.id,
+                            qty_consumed=c.qty_consumed,
+                            proceeds=c.proceeds,
+                            realized_gain=c.realized_gain,
+                        )
                     )
+                    state = next(
+                        lot for lot in open_lots if lot.id == c.lot_id
+                    )
+                    _sync_lot_row(buy_lot, state)
+                    consumptions += 1
+            # DIVIDEND/FEE/INTEREST ignored for lot tracking in v1
+        else:
+            transfer = payload  # type: ignore[assignment]
+            assert isinstance(transfer, DepotTransfer)
+            result = apply_transfer(
+                open_lots,
+                asset_key=transfer.isin,
+                quantity=transfer.quantity,
+                from_account_id=transfer.from_account_id,
+                to_account_id=transfer.to_account_id,
+                transfer_date=transfer.transfer_date,
+            )
+            for move in result.moves:
+                if move.source_lot_id is None or move.source_lot_id not in lots_by_id:
+                    raise FifoError(
+                        f"Missing source lot for transfer {transfer.id}"
+                    )
+                source_state = next(
+                    lot for lot in open_lots if lot.id == move.source_lot_id
                 )
-                buy_lot.open_qty = next(
-                    lot.open_qty for lot in open_lots if lot.activity_id == c.lot_activity_id
-                )
-                buy_lot.status = next(
-                    lot.status for lot in open_lots if lot.activity_id == c.lot_activity_id
-                )
-                buy_lot.closed_at = next(
-                    lot.closed_at for lot in open_lots if lot.activity_id == c.lot_activity_id
-                )
-                consumptions += 1
-        # DIVIDEND/FEE/INTEREST ignored for lot tracking in v1
+                _sync_lot_row(lots_by_id[move.source_lot_id], source_state)
+            for dest_state in result.new_lots:
+                row = _persist_lot(session, dest_state)
+                lots_by_id[row.id] = row
+            transfers_applied += 1
 
     session.flush()
-    _reattach_document_link_lots(session, lot_rows)
+    _reattach_document_link_lots(session, lots_by_id)
     return RebuildResult(
-        lots_created=len(lot_rows),
+        lots_created=len(lots_by_id),
         consumptions=consumptions,
         activities_processed=len(activities),
+        transfers_applied=transfers_applied,
     )
 
 
 def _reattach_document_link_lots(
     session: Session,
-    lot_rows: dict[int, Lot],
+    lots_by_id: dict[int, Lot],
 ) -> None:
     """Restore document_links.lot_id from activity_id after a FIFO rebuild."""
+    by_activity: dict[int, list[Lot]] = {}
+    for lot in lots_by_id.values():
+        by_activity.setdefault(lot.activity_id, []).append(lot)
+
     links = session.scalars(
         select(DocumentLink).where(DocumentLink.activity_id.is_not(None))
     ).all()
     for link in links:
-        lot = lot_rows.get(int(link.activity_id))
-        if lot is not None:
-            link.lot_id = lot.id
+        candidates = by_activity.get(int(link.activity_id), [])
+        if not candidates:
+            continue
+        open_candidates = [
+            lot
+            for lot in candidates
+            if lot.status in (LotStatus.OPEN, LotStatus.PARTIAL)
+        ]
+        pool = open_candidates or candidates
+        chosen = sorted(pool, key=lambda lot: (lot.open_date, lot.id))[0]
+        link.lot_id = chosen.id
     session.flush()
 
 
