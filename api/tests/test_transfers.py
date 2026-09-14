@@ -2,15 +2,66 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from portmetrics.db.models import DepotTransfer, Lot, LotConsumption
+from portmetrics.db.models import Activity, DepotTransfer, LotConsumption
 from portmetrics.fifo.engine import FifoError, apply_transfer, create_lot_from_buy
 from portmetrics.fifo.service import list_open_lots, rebuild_lots
 from portmetrics.fifo.transfers import create_transfer, delete_transfer, list_transfers
-from tests.test_fifo import _buy, _sell
+
+
+def _buy(
+    session: Session,
+    *,
+    qty: str,
+    price: str,
+    day: date,
+    account_id: str = "acc-a",
+) -> Activity:
+    row = Activity(
+        gf_activity_id=uuid4(),
+        account_id=account_id,
+        isin="IE00BK5BQT80",
+        symbol="VWCE.DE",
+        type="BUY",
+        quantity=Decimal(qty),
+        unit_price=Decimal(price),
+        fee=Decimal("0"),
+        currency="EUR",
+        trade_date=day,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _sell(
+    session: Session,
+    *,
+    qty: str,
+    price: str,
+    day: date,
+    account_id: str = "acc-b",
+) -> Activity:
+    row = Activity(
+        gf_activity_id=uuid4(),
+        account_id=account_id,
+        isin="IE00BK5BQT80",
+        symbol="VWCE.DE",
+        type="SELL",
+        quantity=Decimal(qty),
+        unit_price=Decimal(price),
+        fee=Decimal("0"),
+        currency="EUR",
+        trade_date=day,
+    )
+    session.add(row)
+    session.flush()
+    return row
 
 
 def test_apply_transfer_moves_cost_basis_without_gain() -> None:
