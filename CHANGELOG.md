@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Features
+- UI-Hierarchie **Gesamt → Depot → Position** (Hash-Routing, Depot-Karten, Positions-Detail); Overview scoped via `?account_id=`; Freibetrag bleibt portfolio-weit
 - Interne **Depotüberträge** (`depot_transfers`): Lots wandern mit Einstand/Kaufdatum, kein realisierter Gewinn; `GET/POST/DELETE /api/transfers`
 - **Account-scoped FIFO**: Lots/Verkäufe nur innerhalb desselben Ghostfolio-Kontos (#67); `lots.account_id`, Filter `?account_id=` auf Lots/Positionen/Simulator
 - Ghostfolio-**Account-Sync**: Konten (Depots) werden gespiegelt (`accounts`); `GET /api/accounts`; Teil des Mirror-/Scheduler-/Worker-Syncs

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   api,
+  Account,
   AssetIdentifierRow,
   Lot,
   Overview,
@@ -24,9 +25,11 @@ import {
 import {
   SETTINGS_SECTIONS,
   money,
+  parsePortfolioHash,
   parseSettingsHash,
   pct,
   pctPoints,
+  portfolioHash,
   qty,
   ratio,
   sameIdNameList,
@@ -34,6 +37,7 @@ import {
   signedClass,
   sortRows,
   toggleSort,
+  type PortfolioRoute,
   type SettingsSection,
   type SortState,
 } from "./uiUtils";
@@ -388,19 +392,28 @@ const OPS_ACTIONS: {
 ];
 
 export default function App() {
-  const initialSettingsSection = parseSettingsHash(
-    typeof window !== "undefined" ? window.location.hash : "",
-  );
+  const initialHash = typeof window !== "undefined" ? window.location.hash : "";
+  const initialSettingsSection = parseSettingsHash(initialHash);
+  const initialPortfolio = parsePortfolioHash(initialHash);
   const [tab, setTab] = useState<Tab>(initialSettingsSection ? "settings" : "overview");
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(
     initialSettingsSection ?? "ops",
   );
+  const [scopeAccountId, setScopeAccountId] = useState<string | null>(
+    initialPortfolio?.accountId ?? null,
+  );
+  const [positionIsin, setPositionIsin] = useState<string | null>(
+    initialPortfolio?.positionIsin ?? null,
+  );
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [lots, setLots] = useState<Lot[]>([]);
+  const [positionLots, setPositionLots] = useState<Lot[]>([]);
   const [staging, setStaging] = useState<StagingItem[]>([]);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [simResult, setSimResult] = useState<Record<string, unknown> | null>(null);
+  const [simAccountId, setSimAccountId] = useState("");
   const [version, setVersion] = useState<VersionInfo>(FALLBACK_VERSION);
   const [paperlessSettings, setPaperlessSettings] = useState<PaperlessSettings | null>(null);
   const [portfolioSettings, setPortfolioSettings] = useState<PortfolioSettings | null>(null);
@@ -441,19 +454,21 @@ export default function App() {
   const refresh = useCallback(async () => {
     setError("");
     try {
-      const [ov, lotData, stagingData, versionInfo, portfolio, paperless, assets, overviewPrefs] =
+      const [ov, lotData, stagingData, versionInfo, portfolio, paperless, assets, overviewPrefs, accountData] =
         await Promise.all([
-          api.overview(),
-          api.lots(),
+          api.overview(scopeAccountId),
+          api.lots(scopeAccountId ? { account_id: scopeAccountId } : undefined),
           api.staging(),
           api.version().catch(() => FALLBACK_VERSION),
           api.portfolioSettings().catch(() => null),
           api.paperlessSettings().catch(() => null),
           api.assetIdentifiers().catch(() => ({ items: [] as AssetIdentifierRow[] })),
           api.overviewSettings().catch(() => null as OverviewSettings | null),
+          api.accounts().catch(() => ({ count: 0, accounts: [] as Account[] })),
         ]);
       setOverview(ov);
       setLots(lotData.lots);
+      setAccounts(accountData.accounts);
       setStaging(stagingData.items);
       setVersion(versionInfo);
       setAssetRows(assets.items);
@@ -466,11 +481,12 @@ export default function App() {
       if (paperless) {
         setPaperlessSettings(paperless);
       }
-      setStatus(`Stand ${ov.as_of}`);
+      const scopeLabel = ov.scope?.account_name ? ` · ${ov.scope.account_name}` : "";
+      setStatus(`Stand ${ov.as_of}${scopeLabel}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [scopeAccountId]);
 
   const loadSettings = useCallback(async () => {
     setError("");
@@ -529,6 +545,48 @@ export default function App() {
       void loadSettings();
     }
   }, [tab, loadSettings]);
+
+  const navigatePortfolio = useCallback((route: PortfolioRoute) => {
+    const nextHash = portfolioHash(route);
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+    setScopeAccountId(route.accountId);
+    setPositionIsin(route.positionIsin);
+    setTab("overview");
+  }, []);
+
+  useEffect(() => {
+    function onHash() {
+      const settings = parseSettingsHash(window.location.hash);
+      if (settings) {
+        setTab("settings");
+        setSettingsSection(settings);
+        return;
+      }
+      const route = parsePortfolioHash(window.location.hash);
+      if (!route) return;
+      setScopeAccountId(route.accountId);
+      setPositionIsin(route.positionIsin);
+      setTab("overview");
+    }
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    if (!positionIsin) {
+      setPositionLots([]);
+      return;
+    }
+    void api
+      .lots({
+        isin: positionIsin,
+        account_id: scopeAccountId ?? undefined,
+      })
+      .then((data) => setPositionLots(data.lots))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+  }, [positionIsin, scopeAccountId]);
 
   function applyPortfolioDrafts(portfolio: PortfolioSettings) {
     setAllowanceDraft(portfolio.tax_allowance_eur);
@@ -711,6 +769,7 @@ export default function App() {
         quantity: String(form.get("quantity") ?? ""),
         unit_price: String(form.get("unit_price") || "") || undefined,
         fee: String(form.get("fee") || "0"),
+        account_id: simAccountId || undefined,
       });
       setSimResult(result);
       setStatus("Simulation OK");
@@ -1169,6 +1228,162 @@ export default function App() {
 
       {tab === "overview" && overview && (
         <div className="workspace">
+          <nav className="crumbs" aria-label="Depot-Navigation">
+            <button
+              type="button"
+              className={!scopeAccountId && !positionIsin ? "active" : ""}
+              onClick={() =>
+                navigatePortfolio({ kind: "overview", accountId: null, positionIsin: null })
+              }
+            >
+              Gesamt
+            </button>
+            {scopeAccountId && (
+              <>
+                <span className="crumbs-sep">/</span>
+                <button
+                  type="button"
+                  className={scopeAccountId && !positionIsin ? "active" : ""}
+                  onClick={() =>
+                    navigatePortfolio({
+                      kind: "depot",
+                      accountId: scopeAccountId,
+                      positionIsin: null,
+                    })
+                  }
+                >
+                  {overview.scope?.account_name ||
+                    accounts.find((a) => a.id === scopeAccountId)?.name ||
+                    scopeAccountId}
+                </button>
+              </>
+            )}
+            {positionIsin && (
+              <>
+                <span className="crumbs-sep">/</span>
+                <span className="crumbs-current mono">
+                  {overview.positions.find((p) => p.isin === positionIsin)?.display_id ||
+                    positionIsin}
+                </span>
+              </>
+            )}
+          </nav>
+
+          {!scopeAccountId && !positionIsin && (overview.accounts_summary?.length ?? 0) > 0 && (
+            <Panel label="Depots" meta={`${overview.accounts_summary?.length ?? 0} KONTEN`}>
+              <div className="depot-grid">
+                {(overview.accounts_summary ?? []).map((acc) => (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    className="depot-card"
+                    onClick={() =>
+                      navigatePortfolio({
+                        kind: "depot",
+                        accountId: acc.id,
+                        positionIsin: null,
+                      })
+                    }
+                  >
+                    <strong>{acc.name}</strong>
+                    <span className="muted mono">NAV {money(acc.nav, showMode)}</span>
+                    <span className="muted mono">Investiert {money(acc.invested, showMode)}</span>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          )}
+
+          {positionIsin ? (
+            <Panel
+              label="Position"
+              meta={positionIsin}
+              actions={
+                <button
+                  type="button"
+                  className="panel-action"
+                  onClick={() =>
+                    navigatePortfolio(
+                      scopeAccountId
+                        ? { kind: "depot", accountId: scopeAccountId, positionIsin: null }
+                        : { kind: "overview", accountId: null, positionIsin: null },
+                    )
+                  }
+                >
+                  Zurück
+                </button>
+              }
+            >
+              {(() => {
+                const pos = overview.positions.find((p) => p.isin === positionIsin);
+                if (!pos) return <p className="muted">Position nicht gefunden.</p>;
+                return (
+                  <>
+                    <div className="grid">
+                      <div className="stat">
+                        <span>Investiert</span>
+                        <strong className="mono">{money(pos.invested, showMode)}</strong>
+                      </div>
+                      <div className="stat">
+                        <span>Marktwert</span>
+                        <strong className="mono">{money(pos.market_value, showMode)}</strong>
+                      </div>
+                      <div className="stat">
+                        <span>Einfache Rendite</span>
+                        <strong className={`mono ${signedClass(pos.simple_return, showMode)}`}>
+                          {pct(pos.simple_return, showMode)}
+                        </strong>
+                      </div>
+                      <div className="stat">
+                        <span>IRR</span>
+                        <strong className={`mono ${signedClass(pos.irr, showMode)}`}>
+                          {pct(pos.irr, showMode)}
+                        </strong>
+                      </div>
+                      <div className="stat">
+                        <span>Max DD</span>
+                        <strong className={`mono ${signedClass(pos.max_drawdown, showMode)}`}>
+                          {pct(pos.max_drawdown, showMode)}
+                        </strong>
+                      </div>
+                    </div>
+                    <div className="table-wrap" style={{ marginTop: "1rem" }}>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Depot</th>
+                            <th>Datum</th>
+                            <th>Menge</th>
+                            <th>Einstand</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {positionLots.map((lot) => (
+                            <tr key={lot.id}>
+                              <td>{lot.account_name || lot.account_id || "—"}</td>
+                              <td className="mono">{lot.open_date}</td>
+                              <td className="mono">{qty(lot.open_qty, showMode)}</td>
+                              <td className="mono">{money(lot.unit_cost, showMode)}</td>
+                              <td className="mono">{lot.status}</td>
+                            </tr>
+                          ))}
+                          {positionLots.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="muted">
+                                Keine offenen Lots.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                );
+              })()}
+            </Panel>
+          ) : (
+            <>
           <Panel
             label="Kennzahlen"
             meta={`AS OF ${overview.as_of}`}
@@ -1206,6 +1421,49 @@ export default function App() {
               </p>
             ) : null}
           </Panel>
+          {scopeAccountId ? (
+            <Panel label="Positionen" meta={`${overview.positions.length} ZEILEN`}>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Asset</th>
+                      <th>Marktwert</th>
+                      <th>Rendite</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.positions.map((p) => (
+                      <tr
+                        key={p.isin}
+                        className="row-link"
+                        onClick={() =>
+                          navigatePortfolio({
+                            kind: "position",
+                            accountId: scopeAccountId,
+                            positionIsin: p.isin,
+                          })
+                        }
+                      >
+                        <td className="mono">{p.display_id ?? p.isin}</td>
+                        <td className="mono">{money(p.market_value, showMode)}</td>
+                        <td className={`mono ${signedClass(p.simple_return, showMode)}`}>
+                          {pct(p.simple_return, showMode)}
+                        </td>
+                      </tr>
+                    ))}
+                    {overview.positions.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="muted">
+                          Keine Positionen in diesem Depot.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          ) : null}
           <Panel label="Perioden-Rendite">
             <div className="table-wrap">
               <table>
@@ -1351,6 +1609,8 @@ export default function App() {
               </div>
             </Panel>
           ) : null}
+            </>
+          )}
         </div>
       )}
 
@@ -1363,6 +1623,12 @@ export default function App() {
                   <SortHeader
                     label="Asset"
                     column="display_id"
+                    sort={lotsSort}
+                    onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
+                  />
+                  <SortHeader
+                    label="Depot"
+                    column="account_name"
                     sort={lotsSort}
                     onSort={(column) => setLotsSort((s) => toggleSort(s, column))}
                   />
@@ -1415,6 +1681,7 @@ export default function App() {
                 {sortRows(lots, lotsSort).map((lot) => (
                   <tr key={lot.id}>
                     <td className="mono">{lot.display_id ?? lot.isin}</td>
+                    <td>{lot.account_name || lot.account_id || "—"}</td>
                     <td className="mono">{lot.open_date}</td>
                     <td>{lot.status}</td>
                     <td className="mono">{qty(lot.open_qty, showMode)}</td>
@@ -1519,8 +1786,22 @@ export default function App() {
               </thead>
               <tbody>
                 {sortRows(overview.positions, positionsSort).map((p) => (
-                  <tr key={p.isin}>
-                    <td className="mono">{p.display_id ?? p.isin}</td>
+                  <tr
+                    key={p.isin}
+                    className="row-link"
+                    onClick={() =>
+                      navigatePortfolio({
+                        kind: "position",
+                        accountId: scopeAccountId,
+                        positionIsin: p.isin,
+                      })
+                    }
+                  >
+                    <td className="mono">
+                      <button type="button" className="linkish">
+                        {p.display_id ?? p.isin}
+                      </button>
+                    </td>
                     <td className="mono">{qty(p.open_qty, showMode)}</td>
                     <td className="mono">{money(p.invested, showMode)}</td>
                     <td className="mono">{money(p.market_value, showMode)}</td>
@@ -1688,6 +1969,20 @@ export default function App() {
               <label>
                 ISIN / Asset-Key
                 <input name="isin" required placeholder="IE00BK5BQT80" />
+              </label>
+              <label>
+                Depot
+                <select
+                  value={simAccountId}
+                  onChange={(e) => setSimAccountId(e.target.value)}
+                >
+                  <option value="">Automatisch (ein Depot)</option>
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.name}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 Stückzahl

@@ -321,8 +321,11 @@ def post_simulate_sell(payload: dict, db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/api/metrics/overview")
-def metrics_overview(db: Session = Depends(get_db)) -> dict:
-    return overview_payload(db)
+def metrics_overview(
+    account_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    return overview_payload(db, account_id=account_id)
 
 
 @app.get("/api/metrics/periods")

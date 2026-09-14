@@ -14,7 +14,7 @@ Basis-URL im Container: `http://host:8080`
 | `POST` | `/api/fifo/rebuild` | FIFO neu berechnen |
 | `GET` | `/api/lots` | Offene Lots (`?isin=` / `?account_id=`) |
 | `POST` | `/api/simulate/sell` | What-If Verkauf (`account_id` bei multi-Depot nötig) |
-| `GET` | `/api/metrics/overview` | Dashboard-Kennzahlen inkl. Perioden + Jahres-Renditen |
+| `GET` | `/api/metrics/overview` | Dashboard-Kennzahlen inkl. Perioden + Jahres-Renditen (`?account_id=` für Depot-Scope; Freibetrag immer gesamt) |
 | `GET` | `/api/metrics/periods` | Perioden + CAGR |
 | `GET` | `/api/metrics/nav` | NAV-Serie (`?start=&end=`) |
 | `POST` | `/api/metrics/rebuild` | `metrics_daily` neu |

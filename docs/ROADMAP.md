@@ -43,6 +43,7 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 | — | Ghostfolio Account-Sync (Depot-Namen) | P2 | ✅ |
 | [#67](https://github.com/MrMoep/PortMetrics/issues/67) | Account-scoped FIFO (Depot-Trennung) | P2 | ✅ |
 | — | Interne Depotüberträge (Lot-Migration) | P2 | ✅ |
+| — | UI Gesamt → Depot → Position | P2 | ✅ |
 
 ## Future / nach 0.2
 
