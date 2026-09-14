@@ -6,7 +6,7 @@ Paperless NGX ist **Belegarchiv + Staging**, nicht das Ledger. Extrahierte Felde
 
 
 
-Teil von **PortMetrics 0.2.0**. Verwandt: [API.md](API.md), [DATA_MODEL.md](DATA_MODEL.md).
+Teil von **PortMetrics 1.0.0**. Verwandt: [API.md](API.md), [DATA_MODEL.md](DATA_MODEL.md).
 
 
 
