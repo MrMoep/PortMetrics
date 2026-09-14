@@ -4,6 +4,17 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+# Pseudo-depot for activities/lots without Ghostfolio accountId.
+UNASSIGNED_ACCOUNT_ID = "__unassigned__"
+
+
+def normalize_account_id(account_id: str | None) -> str:
+    """Map NULL/empty account to the unassigned pseudo-depot."""
+    if account_id is None:
+        return UNASSIGNED_ACCOUNT_ID
+    stripped = account_id.strip()
+    return stripped if stripped else UNASSIGNED_ACCOUNT_ID
+
 
 class FifoError(ValueError):
     """Raised when FIFO cannot consume enough quantity."""
@@ -17,6 +28,7 @@ class LotState:
     original_qty: Decimal
     cost_basis: Decimal
     open_date: date
+    account_id: str = UNASSIGNED_ACCOUNT_ID
     status: str = "OPEN"
     closed_at: date | None = None
     id: int | None = None
@@ -55,6 +67,7 @@ def create_lot_from_buy(
     unit_price: Decimal,
     fee: Decimal,
     trade_date: date,
+    account_id: str | None = None,
 ) -> LotState:
     qty = Decimal(quantity)
     fee_dec = Decimal(fee or 0)
@@ -66,6 +79,7 @@ def create_lot_from_buy(
         original_qty=qty,
         cost_basis=qty * price + fee_dec,
         open_date=trade_date,
+        account_id=normalize_account_id(account_id),
         status="OPEN",
     )
 
@@ -78,18 +92,25 @@ def apply_sell(
     unit_price: Decimal,
     fee: Decimal = Decimal("0"),
     trade_date: date | None = None,
+    account_id: str | None = None,
 ) -> SellResult:
-    """Consume oldest open lots first (FIFO). Mutates `lots` in place."""
+    """Consume oldest open lots first within the same account (FIFO)."""
     remaining = Decimal(quantity)
     if remaining <= 0:
         raise FifoError("Sell quantity must be positive")
 
+    scope = normalize_account_id(account_id)
     sell_price = Decimal(unit_price)
     fee_dec = Decimal(fee or 0)
-    # Allocate fee proportionally across consumed qty for proceeds netting
     result = SellResult()
     eligible = sorted(
-        (lot for lot in lots if lot.asset_key == asset_key and lot.open_qty > 0),
+        (
+            lot
+            for lot in lots
+            if lot.asset_key == asset_key
+            and lot.account_id == scope
+            and lot.open_qty > 0
+        ),
         key=lambda lot: (lot.open_date, lot.activity_id),
     )
 
@@ -99,7 +120,6 @@ def apply_sell(
         take = min(remaining, lot.open_qty)
         unit_cost = lot.unit_cost
         proceeds = take * sell_price
-        # fee share proportional to qty
         fee_share = (take / Decimal(quantity)) * fee_dec if quantity else Decimal("0")
         net_proceeds = proceeds - fee_share
         gain = net_proceeds - take * unit_cost
@@ -128,7 +148,8 @@ def apply_sell(
 
     if remaining > 0:
         raise FifoError(
-            f"Insufficient open lots for {asset_key}: short by {remaining}"
+            f"Insufficient open lots for {asset_key} in account {scope}: "
+            f"short by {remaining}"
         )
     return result
 

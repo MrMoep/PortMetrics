@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Features
+- **Account-scoped FIFO**: Lots/Verkäufe nur innerhalb desselben Ghostfolio-Kontos (#67); `lots.account_id`, Filter `?account_id=` auf Lots/Positionen/Simulator
 - Ghostfolio-**Account-Sync**: Konten (Depots) werden gespiegelt (`accounts`); `GET /api/accounts`; Teil des Mirror-/Scheduler-/Worker-Syncs
 - Overview: Kennzahlen ein-/ausblenden, sortieren und Hero wählen (persistiert unter `app_settings.overview`); Panel-Link „Anpassen“ (#77)
 - Kennungs-Tabelle ISIN/WKN/preferred Symbol (Einstellungen → Assets); Paperless-Confirm blockiert ohne Mapping; Historien-Vorschlag + Staging-Deep-Link (#57)
