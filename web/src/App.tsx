@@ -1366,6 +1366,7 @@ export default function App() {
             </Panel>
           ) : (
             <>
+          <div className="workspace-col">
           <Panel
             label="Kennzahlen"
             meta={`AS OF ${overview.as_of}`}
@@ -1446,99 +1447,6 @@ export default function App() {
               </div>
             </Panel>
           ) : null}
-          <Panel label="Perioden-Rendite">
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Periode</th>
-                    <th>Von</th>
-                    <th>Bis</th>
-                    <th>Rendite</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overview.periods.map((p) => (
-                    <tr key={p.label}>
-                      <td>{p.label}</td>
-                      <td className="mono">{p.start_date}</td>
-                      <td className="mono">{p.end_date}</td>
-                      <td className={`mono ${signedClass(p.period_return, showMode)}`}>
-                        {pct(p.period_return, showMode)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Panel>
-          {overview.annual_returns && overview.annual_returns.length > 0 ? (
-            <Panel
-              label="Jahres-Rendite"
-              meta={`${overview.annual_returns.length} JAHRE`}
-              className="pane-trail"
-              offset
-            >
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Jahr</th>
-                      <th title={METRIC_HINTS.yearClose}>Abschluss</th>
-                      <th title={METRIC_HINTS.yearToDate}>Bis heute</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview.annual_returns.map((row) => (
-                      <tr key={row.label}>
-                        <td className="mono">{row.label}</td>
-                        <td className={`mono ${signedClass(row.year_return, showMode)}`}>
-                          {pct(row.year_return, showMode)}
-                        </td>
-                        <td className={`mono ${signedClass(row.return_to_date, showMode)}`}>
-                          {row.return_to_date == null ? "—" : pct(row.return_to_date, showMode)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-          ) : null}
-          {!scopeAccountId && !positionIsin && (overview.accounts_summary?.length ?? 0) > 0 ? (
-            <Panel
-              label="Depots"
-              meta={`${overview.accounts_summary?.length ?? 0} KONTEN`}
-              className="pane-trail depot-panel"
-            >
-              <div className="depot-grid">
-                {(overview.accounts_summary ?? []).map((acc) => (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    className="depot-card"
-                    onClick={() =>
-                      navigatePortfolio({
-                        kind: "depot",
-                        accountId: acc.id,
-                        positionIsin: null,
-                      })
-                    }
-                  >
-                    <strong>{acc.name}</strong>
-                    <span className="mono">
-                      NAV {money(acc.nav, showMode)}
-                      <span className="muted depot-returns">
-                        {" "}
-                        (IRR {pct(acc.irr, showMode)} · einfach{" "}
-                        {pct(acc.simple_return, showMode)})
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </Panel>
-          ) : null}
           {overview.cashflows && overview.cashflows.length > 0 ? (
             <Panel
               label="Cashflow-Timeline"
@@ -1550,7 +1458,6 @@ export default function App() {
                   return true;
                 }).length
               } FLOWS`}
-              offset
             >
               <div className="cf-filters" title={METRIC_HINTS.cashflowFilter}>
                 {(
@@ -1625,6 +1532,100 @@ export default function App() {
               </div>
             </Panel>
           ) : null}
+          </div>
+          <div className="workspace-col">
+          <Panel label="Perioden-Rendite">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Periode</th>
+                    <th>Von</th>
+                    <th>Bis</th>
+                    <th>Rendite</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {overview.periods.map((p) => (
+                    <tr key={p.label}>
+                      <td>{p.label}</td>
+                      <td className="mono">{p.start_date}</td>
+                      <td className="mono">{p.end_date}</td>
+                      <td className={`mono ${signedClass(p.period_return, showMode)}`}>
+                        {pct(p.period_return, showMode)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+          {overview.annual_returns && overview.annual_returns.length > 0 ? (
+            <Panel
+              label="Jahres-Rendite"
+              meta={`${overview.annual_returns.length} JAHRE`}
+            >
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Jahr</th>
+                      <th title={METRIC_HINTS.yearClose}>Abschluss</th>
+                      <th title={METRIC_HINTS.yearToDate}>Bis heute</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.annual_returns.map((row) => (
+                      <tr key={row.label}>
+                        <td className="mono">{row.label}</td>
+                        <td className={`mono ${signedClass(row.year_return, showMode)}`}>
+                          {pct(row.year_return, showMode)}
+                        </td>
+                        <td className={`mono ${signedClass(row.return_to_date, showMode)}`}>
+                          {row.return_to_date == null ? "—" : pct(row.return_to_date, showMode)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          ) : null}
+          {!scopeAccountId && !positionIsin && (overview.accounts_summary?.length ?? 0) > 0 ? (
+            <Panel
+              label="Depots"
+              meta={`${overview.accounts_summary?.length ?? 0} KONTEN`}
+              className="depot-panel"
+            >
+              <div className="depot-grid">
+                {(overview.accounts_summary ?? []).map((acc) => (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    className="depot-card"
+                    onClick={() =>
+                      navigatePortfolio({
+                        kind: "depot",
+                        accountId: acc.id,
+                        positionIsin: null,
+                      })
+                    }
+                  >
+                    <strong>{acc.name}</strong>
+                    <span className="mono">
+                      NAV {money(acc.nav, showMode)}
+                      <span className="muted depot-returns">
+                        {" "}
+                        (IRR {pct(acc.irr, showMode)} · einfach{" "}
+                        {pct(acc.simple_return, showMode)})
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
+          </div>
             </>
           )}
         </div>
