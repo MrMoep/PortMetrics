@@ -441,6 +441,16 @@ def test_save_and_resolve_mapping(db_session) -> None:
     )
     assert saved_url["public_url"] == "https://paperless.example.com"
 
+    hidden = save_paperless_settings(
+        db_session,
+        {
+            "field_map": saved["field_map"],
+            "hidden_account_ids": ["acc-empty", "acc-empty", "  "],
+        },
+    )
+    assert hidden["hidden_account_ids"] == ["acc-empty"]
+    assert get_paperless_settings(db_session)["hidden_account_ids"] == ["acc-empty"]
+
     def handler(request: httpx.Request) -> httpx.Response:
         handled = _fields_handler(request)
         if handled:

@@ -426,6 +426,7 @@ export default function App() {
   const [syncTagsDraft, setSyncTagsDraft] = useState<PaperlessIdName[]>([]);
   const [syncDocTypesDraft, setSyncDocTypesDraft] = useState<PaperlessIdName[]>([]);
   const [accountDraft, setAccountDraft] = useState("");
+  const [hiddenAccountIdsDraft, setHiddenAccountIdsDraft] = useState<string[]>([]);
   const [dataSourceDraft, setDataSourceDraft] = useState("YAHOO");
   const [publicUrlDraft, setPublicUrlDraft] = useState("");
   const [allowanceDraft, setAllowanceDraft] = useState("1000");
@@ -505,6 +506,7 @@ export default function App() {
       setSyncTagsDraft(cfg.sync_tags ?? []);
       setSyncDocTypesDraft(cfg.sync_document_types ?? []);
       setAccountDraft(cfg.ghostfolio_default_account_id ?? "");
+      setHiddenAccountIdsDraft(cfg.hidden_account_ids ?? []);
       setDataSourceDraft(cfg.ghostfolio_data_source || "YAHOO");
       setPublicUrlDraft(cfg.public_url ?? "");
       setAllowanceDraft(portfolio.tax_allowance_eur);
@@ -604,6 +606,7 @@ export default function App() {
     setSyncTagsDraft(cfg.sync_tags ?? []);
     setSyncDocTypesDraft(cfg.sync_document_types ?? []);
     setAccountDraft(cfg.ghostfolio_default_account_id ?? "");
+    setHiddenAccountIdsDraft(cfg.hidden_account_ids ?? []);
     setDataSourceDraft(cfg.ghostfolio_data_source || "YAHOO");
     setPublicUrlDraft(cfg.public_url ?? "");
   }
@@ -638,9 +641,12 @@ export default function App() {
     if (!paperlessSettings) return false;
     const savedAccount = paperlessSettings.ghostfolio_default_account_id ?? "";
     const savedSource = paperlessSettings.ghostfolio_data_source || "YAHOO";
+    const savedHidden = [...(paperlessSettings.hidden_account_ids ?? [])].sort();
+    const draftHidden = [...hiddenAccountIdsDraft].sort();
     return (
       accountDraft.trim() !== savedAccount ||
-      (dataSourceDraft.trim() || "YAHOO") !== savedSource
+      (dataSourceDraft.trim() || "YAHOO") !== savedSource ||
+      JSON.stringify(draftHidden) !== JSON.stringify(savedHidden)
     );
   }
 
@@ -832,6 +838,7 @@ export default function App() {
       const saved = await api.savePaperlessSettings({
         ghostfolio_default_account_id: accountDraft.trim() || null,
         ghostfolio_data_source: dataSourceDraft.trim() || "YAHOO",
+        hidden_account_ids: hiddenAccountIdsDraft,
       });
       setPaperlessSettings(saved);
       applyPaperlessDrafts(saved);
@@ -1269,31 +1276,6 @@ export default function App() {
             )}
           </nav>
 
-          {!scopeAccountId && !positionIsin && (overview.accounts_summary?.length ?? 0) > 0 && (
-            <Panel label="Depots" meta={`${overview.accounts_summary?.length ?? 0} KONTEN`}>
-              <div className="depot-grid">
-                {(overview.accounts_summary ?? []).map((acc) => (
-                  <button
-                    key={acc.id}
-                    type="button"
-                    className="depot-card"
-                    onClick={() =>
-                      navigatePortfolio({
-                        kind: "depot",
-                        accountId: acc.id,
-                        positionIsin: null,
-                      })
-                    }
-                  >
-                    <strong>{acc.name}</strong>
-                    <span className="muted mono">NAV {money(acc.nav, showMode)}</span>
-                    <span className="muted mono">Investiert {money(acc.invested, showMode)}</span>
-                  </button>
-                ))}
-              </div>
-            </Panel>
-          )}
-
           {positionIsin ? (
             <Panel
               label="Position"
@@ -1490,6 +1472,73 @@ export default function App() {
               </table>
             </div>
           </Panel>
+          {overview.annual_returns && overview.annual_returns.length > 0 ? (
+            <Panel
+              label="Jahres-Rendite"
+              meta={`${overview.annual_returns.length} JAHRE`}
+              className="pane-trail"
+              offset
+            >
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Jahr</th>
+                      <th title={METRIC_HINTS.yearClose}>Abschluss</th>
+                      <th title={METRIC_HINTS.yearToDate}>Bis heute</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.annual_returns.map((row) => (
+                      <tr key={row.label}>
+                        <td className="mono">{row.label}</td>
+                        <td className={`mono ${signedClass(row.year_return, showMode)}`}>
+                          {pct(row.year_return, showMode)}
+                        </td>
+                        <td className={`mono ${signedClass(row.return_to_date, showMode)}`}>
+                          {row.return_to_date == null ? "—" : pct(row.return_to_date, showMode)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          ) : null}
+          {!scopeAccountId && !positionIsin && (overview.accounts_summary?.length ?? 0) > 0 ? (
+            <Panel
+              label="Depots"
+              meta={`${overview.accounts_summary?.length ?? 0} KONTEN`}
+              className="pane-trail depot-panel"
+            >
+              <div className="depot-grid">
+                {(overview.accounts_summary ?? []).map((acc) => (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    className="depot-card"
+                    onClick={() =>
+                      navigatePortfolio({
+                        kind: "depot",
+                        accountId: acc.id,
+                        positionIsin: null,
+                      })
+                    }
+                  >
+                    <strong>{acc.name}</strong>
+                    <span className="mono">
+                      NAV {money(acc.nav, showMode)}
+                      <span className="muted depot-returns">
+                        {" "}
+                        (IRR {pct(acc.irr, showMode)} · einfach{" "}
+                        {pct(acc.simple_return, showMode)})
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          ) : null}
           {overview.cashflows && overview.cashflows.length > 0 ? (
             <Panel
               label="Cashflow-Timeline"
@@ -1568,39 +1617,6 @@ export default function App() {
                         <td className="mono">{cf.asset}</td>
                         <td className={`mono ${signedClass(cf.amount, showMode)}`}>
                           {money(cf.amount, showMode)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-          ) : null}
-          {overview.annual_returns && overview.annual_returns.length > 0 ? (
-            <Panel
-              label="Jahres-Rendite"
-              meta={`${overview.annual_returns.length} JAHRE`}
-              className="pane-trail"
-              offset
-            >
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Jahr</th>
-                      <th title={METRIC_HINTS.yearClose}>Abschluss</th>
-                      <th title={METRIC_HINTS.yearToDate}>Bis heute</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview.annual_returns.map((row) => (
-                      <tr key={row.label}>
-                        <td className="mono">{row.label}</td>
-                        <td className={`mono ${signedClass(row.year_return, showMode)}`}>
-                          {pct(row.year_return, showMode)}
-                        </td>
-                        <td className={`mono ${signedClass(row.return_to_date, showMode)}`}>
-                          {row.return_to_date == null ? "—" : pct(row.return_to_date, showMode)}
                         </td>
                       </tr>
                     ))}
@@ -2393,17 +2409,30 @@ export default function App() {
           {settingsSection === "ghostfolio" && (
             <Panel label="Ghostfolio">
               <p className="muted">
-                Defaults für den Paperless→Ghostfolio-Import (Account und Kursquelle). Speichern
-                schreibt weiterhin in die Paperless-Settings (kein eigener Backend-Key).
+                Defaults für den Paperless→Ghostfolio-Import und Sichtbarkeit der Depots in der
+                Übersicht. Speichern schreibt weiterhin in die Paperless-Settings (kein eigener
+                Backend-Key).
               </p>
               <form className="form form-wide" onSubmit={(e) => void onSaveGhostfolio(e)}>
                 <label>
-                  Ghostfolio Default Account-ID
-                  <input
+                  Default-Depot (Import)
+                  <select
                     value={accountDraft}
                     onChange={(e) => setAccountDraft(e.target.value)}
-                    placeholder="UUID"
-                  />
+                  >
+                    <option value="">(kein Default)</option>
+                    {accounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                  {accountDraft &&
+                    !accounts.some((acc) => acc.id === accountDraft) && (
+                      <span className="muted">
+                        Gespeicherte ID ist unbekannt — bitte neu wählen oder Sync ausführen.
+                      </span>
+                    )}
                 </label>
                 <label>
                   Ghostfolio Data Source
@@ -2413,6 +2442,38 @@ export default function App() {
                     placeholder="YAHOO"
                   />
                 </label>
+                <fieldset className="filter-col">
+                  <legend className="mono">Depots in der Übersicht</legend>
+                  <p className="muted">
+                    Ausgeblendete Konten erscheinen nicht als Depot-Karten (z. B. leeres „My
+                    Account“). Lots, Simulator und Deep-Links bleiben nutzbar.
+                  </p>
+                  {accounts.length === 0 ? (
+                    <p className="muted">Keine Konten — zuerst Ghostfolio-Sync ausführen.</p>
+                  ) : (
+                    <div className="check-list">
+                      {accounts.map((acc) => {
+                        const visible = !hiddenAccountIdsDraft.includes(acc.id);
+                        return (
+                          <label key={acc.id} className="check-row">
+                            <input
+                              type="checkbox"
+                              checked={visible}
+                              onChange={() => {
+                                setHiddenAccountIdsDraft((prev) =>
+                                  visible
+                                    ? [...prev, acc.id]
+                                    : prev.filter((id) => id !== acc.id),
+                                );
+                              }}
+                            />
+                            <span>{acc.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </fieldset>
                 <button className="primary" type="submit">
                   Speichern
                 </button>
