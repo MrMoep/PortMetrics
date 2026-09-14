@@ -22,6 +22,7 @@ import {
   type OverviewKpiId,
   type OverviewLayout,
 } from "./overviewKpis";
+import { ConfirmDialog, type ConfirmOptions, type ConfirmRequest } from "./ConfirmDialog";
 import {
   SETTINGS_SECTIONS,
   money,
@@ -451,6 +452,20 @@ export default function App() {
   );
   const [kpiEditHero, setKpiEditHero] = useState<OverviewKpiId>("nav");
   const [kpiEditSaving, setKpiEditSaving] = useState(false);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+
+  const askConfirm = useCallback((options: ConfirmOptions) => {
+    return new Promise<boolean>((resolve) => {
+      setConfirmRequest({ ...options, resolve });
+    });
+  }, []);
+
+  const settleConfirm = useCallback((ok: boolean) => {
+    setConfirmRequest((current) => {
+      current?.resolve(ok);
+      return null;
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -674,9 +689,15 @@ export default function App() {
     }
   }
 
-  function confirmDiscard(section: SettingsSection): boolean {
+  async function confirmDiscard(section: SettingsSection): Promise<boolean> {
     if (!isSectionDirty(section)) return true;
-    const ok = window.confirm("Ungespeicherte Änderungen verwerfen und fortfahren?");
+    const ok = await askConfirm({
+      title: "Ungespeicherte Änderungen",
+      message: "Ungespeicherte Änderungen verwerfen und fortfahren?",
+      confirmLabel: "Verwerfen",
+      cancelLabel: "Abbrechen",
+      danger: true,
+    });
     if (ok) discardSectionDrafts(section);
     return ok;
   }
@@ -698,10 +719,10 @@ export default function App() {
     }
   }
 
-  function requestTabChange(next: Tab) {
+  async function requestTabChange(next: Tab) {
     if (next === tab) return;
     if (tab === "settings" && next !== "settings") {
-      if (!confirmDiscard(settingsSection)) return;
+      if (!(await confirmDiscard(settingsSection))) return;
       clearSettingsHash();
     }
     if (next === "settings") {
@@ -711,9 +732,9 @@ export default function App() {
     setTab(next);
   }
 
-  function requestSettingsSection(next: SettingsSection) {
+  async function requestSettingsSection(next: SettingsSection) {
     if (next === settingsSection) return;
-    if (!confirmDiscard(settingsSection)) return;
+    if (!(await confirmDiscard(settingsSection))) return;
     setSettingsSection(next);
     writeSettingsHash(next);
   }
@@ -733,20 +754,22 @@ export default function App() {
 
   useEffect(() => {
     const onHashChange = () => {
-      const section = parseSettingsHash(window.location.hash);
-      if (!section) return;
-      const nav = settingsNavRef.current;
-      if (nav.tab !== "settings") {
-        setTab("settings");
+      void (async () => {
+        const section = parseSettingsHash(window.location.hash);
+        if (!section) return;
+        const nav = settingsNavRef.current;
+        if (nav.tab !== "settings") {
+          setTab("settings");
+          setSettingsSection(section);
+          return;
+        }
+        if (section === nav.settingsSection) return;
+        if (!(await nav.confirmDiscard(nav.settingsSection))) {
+          nav.writeSettingsHash(nav.settingsSection);
+          return;
+        }
         setSettingsSection(section);
-        return;
-      }
-      if (section === nav.settingsSection) return;
-      if (!nav.confirmDiscard(nav.settingsSection)) {
-        nav.writeSettingsHash(nav.settingsSection);
-        return;
-      }
-      setSettingsSection(section);
+      })();
     };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
@@ -896,8 +919,8 @@ export default function App() {
     }
   }
 
-  function openAssetsFromStaging(item: StagingItem) {
-    if (!confirmDiscard(settingsSection)) return;
+  async function openAssetsFromStaging(item: StagingItem) {
+    if (!(await confirmDiscard(settingsSection))) return;
     const isin = (item.payload.isin || item.mapping?.isin || "").trim().toUpperCase();
     const wkn = (item.payload.wkn || "").trim().toUpperCase() || null;
     const suggested = item.mapping?.suggested_symbol?.trim() || null;
@@ -1018,16 +1041,24 @@ export default function App() {
     setStatus(`${actionLabel}: Scope prüfen…`);
     const preview = await api.paperlessLinkPreview();
     if (preview.warn_no_filter) {
-      const ok = window.confirm(
-        preview.warning ||
+      const ok = await askConfirm({
+        title: actionLabel,
+        message:
+          preview.warning ||
           `${actionLabel} ohne Tag-/Dokumententyp-Filter (${preview.document_count} Docs). Fortfahren?`,
-      );
+        confirmLabel: "OK",
+        cancelLabel: "Abbrechen",
+      });
       if (!ok) return false;
     } else if (preview.warn_large) {
-      const ok = window.confirm(
-        preview.warning ||
+      const ok = await askConfirm({
+        title: actionLabel,
+        message:
+          preview.warning ||
           `${actionLabel}: ${preview.document_count} Docs im Filter, ${preview.unlinked_lots} unverknüpfte Lots. Fortfahren?`,
-      );
+        confirmLabel: "OK",
+        cancelLabel: "Abbrechen",
+      });
       if (!ok) return false;
     }
     return true;
@@ -1226,7 +1257,7 @@ export default function App() {
             key={id}
             type="button"
             className={tab === id ? "active" : ""}
-            onClick={() => requestTabChange(id)}
+            onClick={() => void requestTabChange(id)}
           >
             {label}
           </button>
@@ -1919,7 +1950,7 @@ export default function App() {
                           <button
                             type="button"
                             className="linkish"
-                            onClick={() => openAssetsFromStaging(item)}
+                            onClick={() => void openAssetsFromStaging(item)}
                           >
                             Tabelle
                           </button>
@@ -2060,7 +2091,7 @@ export default function App() {
                 key={section.id}
                 type="button"
                 className={settingsSection === section.id ? "active" : ""}
-                onClick={() => requestSettingsSection(section.id)}
+                onClick={() => void requestSettingsSection(section.id)}
               >
                 {section.label}
               </button>
@@ -2095,7 +2126,7 @@ export default function App() {
                 <button
                   type="button"
                   className="linkish"
-                  onClick={() => requestTabChange("staging")}
+                  onClick={() => void requestTabChange("staging")}
                 >
                   Staging öffnen
                 </button>
@@ -2612,6 +2643,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog request={confirmRequest} onSettle={settleConfirm} />
     </div>
   );
 }
