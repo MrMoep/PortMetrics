@@ -327,8 +327,13 @@ def nav_series(
     return out
 
 
-def position_simple_return(session: Session, asset_key: str | None = None) -> list[dict]:
-    lots = list_open_lots(session, asset_key=asset_key)
+def position_simple_return(
+    session: Session,
+    asset_key: str | None = None,
+    *,
+    account_id: str | None = None,
+) -> list[dict]:
+    lots = list_open_lots(session, asset_key=asset_key, account_id=account_id)
     by_asset: dict[str, dict[str, Decimal]] = {}
     meta: dict[str, dict[str, str | None]] = {}
     for lot in lots:

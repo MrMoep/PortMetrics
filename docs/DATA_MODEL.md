@@ -42,6 +42,7 @@ FIFO-Kauf-Pakete.
 |--------|-----|--------------|
 | `id` | BIGSERIAL | PK |
 | `activity_id` | BIGINT | FK → activities (Kauf-Activity) |
+| `account_id` | TEXT | Depot (denormalisiert vom Buy; FIFO-Scope) |
 | `isin` | TEXT | Asset |
 | `open_qty` | NUMERIC(18,8) | Restmenge |
 | `original_qty` | NUMERIC(18,8) | Ursprüngliche Menge |
@@ -77,13 +78,16 @@ Verkauf → verbrauchte Lots.
 
 ## FIFO-Algorithmus
 
+FIFO ist **account-scoped**: Partition = `(account_id, asset_key)`.
+Activities ohne `account_id` landen im Pseudo-Depot `__unassigned__`.
+
 ```
 on BUY:
-  create lot(open_qty=qty, cost_basis=qty*price + fee, status=OPEN)
+  create lot(account_id, open_qty=qty, cost_basis=qty*price + fee, status=OPEN)
 
 on SELL:
   remaining = sell_qty
-  for lot in lots.where(isin, status in OPEN|PARTIAL).order_by(open_date ASC):
+  for lot in lots.where(account_id, isin, status in OPEN|PARTIAL).order_by(open_date ASC):
     take = min(remaining, lot.open_qty)
     gain = take * sell_price - take * (lot.cost_basis / lot.original_qty)
     insert lot_consumption(...)
@@ -92,6 +96,8 @@ on SELL:
     remaining -= take
   assert remaining == 0
 ```
+
+Portfolio-KPIs (NAV, YTD, …) aggregieren weiterhin über alle Accounts; nur Lot-Verbrauch und Realisierung sind depotgetrennt.
 
 ## Edge Cases (v1: manuell)
 

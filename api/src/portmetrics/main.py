@@ -238,9 +238,10 @@ def fifo_rebuild(db: Session = Depends(get_db)) -> dict:
 @app.get("/api/lots")
 def get_lots(
     isin: str | None = None,
+    account_id: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
-    lots = list_open_lots(db, asset_key=isin)
+    lots = list_open_lots(db, asset_key=isin, account_id=account_id)
     return {"count": len(lots), "lots": lots}
 
 
@@ -254,6 +255,9 @@ def post_simulate_sell(payload: dict, db: Session = Depends(get_db)) -> dict:
         )
         fee = Decimal(str(payload.get("fee", "0")))
         tax_rate = Decimal(str(payload.get("tax_rate", settings.default_tax_rate)))
+        account_id = payload.get("account_id")
+        if account_id is not None:
+            account_id = str(account_id)
     except (KeyError, Exception) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {exc}") from exc
     try:
@@ -264,6 +268,7 @@ def post_simulate_sell(payload: dict, db: Session = Depends(get_db)) -> dict:
             unit_price=unit_price,
             fee=fee,
             tax_rate=tax_rate,
+            account_id=account_id,
         )
     except FifoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -312,8 +317,16 @@ def metrics_nav(
 
 
 @app.get("/api/positions")
-def positions(isin: str | None = None, db: Session = Depends(get_db)) -> dict:
-    return {"positions": position_simple_return(db, asset_key=isin)}
+def positions(
+    isin: str | None = None,
+    account_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    return {
+        "positions": position_simple_return(
+            db, asset_key=isin, account_id=account_id
+        )
+    }
 
 
 @app.post("/api/metrics/rebuild")

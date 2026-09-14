@@ -41,6 +41,7 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 | [#58](https://github.com/MrMoep/PortMetrics/issues/58) | Sync Orphan-Prune (GF gelöscht → lokal weg) | P1 | ✅ |
 | [#77](https://github.com/MrMoep/PortMetrics/issues/77) | Overview: Kennzahlen auswählbar und sortierbar | P1 | ✅ |
 | — | Ghostfolio Account-Sync (Depot-Namen) | P2 | ✅ |
+| [#67](https://github.com/MrMoep/PortMetrics/issues/67) | Account-scoped FIFO (Depot-Trennung) | P2 | ✅ |
 
 ## Future / nach 0.2
 
@@ -48,7 +49,6 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 |-------|--------------|-----------|-------|
 | [#10](https://github.com/MrMoep/PortMetrics/issues/10) | Sektor-Allokation (Ghostfolio einbetten) | P2 | |
 | [#11](https://github.com/MrMoep/PortMetrics/issues/11) | Edge Cases (Splits, Überträge, Währung) | P2 | |
-| [#67](https://github.com/MrMoep/PortMetrics/issues/67) | Account-scoped FIFO (Depot-Trennung) | P3 | |
 | [#12](https://github.com/MrMoep/PortMetrics/issues/12) | Alerts & Benachrichtigungen | P3 | |
 | [#13](https://github.com/MrMoep/PortMetrics/issues/13) | Multi-User / Multi-Portfolio | P3 | |
 | [#14](https://github.com/MrMoep/PortMetrics/issues/14) | Export (CSV/PDF) für Steuerberater | P3 | |

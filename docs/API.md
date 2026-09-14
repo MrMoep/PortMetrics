@@ -11,13 +11,13 @@ Basis-URL im Container: `http://host:8080`
 | `POST` | `/api/sync/ghostfolio` | Sync Accounts + Activities + Orphan-Prune + FIFO + Metrics |
 | `GET` | `/api/accounts` | Gespiegelte Ghostfolio-Konten (Depots) |
 | `POST` | `/api/fifo/rebuild` | FIFO neu berechnen |
-| `GET` | `/api/lots` | Offene Lots (`?isin=`) |
-| `POST` | `/api/simulate/sell` | What-If Verkauf |
+| `GET` | `/api/lots` | Offene Lots (`?isin=` / `?account_id=`) |
+| `POST` | `/api/simulate/sell` | What-If Verkauf (`account_id` bei multi-Depot nötig) |
 | `GET` | `/api/metrics/overview` | Dashboard-Kennzahlen inkl. Perioden + Jahres-Renditen |
 | `GET` | `/api/metrics/periods` | Perioden + CAGR |
 | `GET` | `/api/metrics/nav` | NAV-Serie (`?start=&end=`) |
 | `POST` | `/api/metrics/rebuild` | `metrics_daily` neu |
-| `GET` | `/api/positions` | Einfache Positionsrendite |
+| `GET` | `/api/positions` | Einfache Positionsrendite (`?isin=` / `?account_id=`) |
 | `GET` | `/api/staging` | Paperless-Review-Queue |
 | `POST` | `/api/staging/sync` | Paperless → Staging (`skip_reasons` bei skips) |
 | `POST` | `/api/staging/match-activities` | Unverknüpfte Lots → Paperless-Docs |

@@ -101,6 +101,13 @@ class Lot(Base):
             name="ck_lots_status",
         ),
         Index("ix_lots_isin_open_date", "isin", "open_date"),
+        Index(
+            "ix_lots_account_isin_status_open_date",
+            "account_id",
+            "isin",
+            "status",
+            "open_date",
+        ),
         {"schema": SCHEMA},
     )
 
@@ -110,6 +117,7 @@ class Lot(Base):
         ForeignKey(f"{SCHEMA}.activities.id"),
         nullable=False,
     )
+    account_id: Mapped[str | None] = mapped_column(Text)
     isin: Mapped[str] = mapped_column(Text, nullable=False)
     open_qty: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
     original_qty: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
