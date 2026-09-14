@@ -25,6 +25,17 @@ class PeriodReturn:
     period_return: Decimal | None
 
 
+@dataclass(frozen=True)
+class AnnualReturn:
+    """Calendar-year return plus open-ended return from the same start to as-of."""
+
+    label: str
+    start_date: date
+    end_date: date
+    year_return: Decimal | None
+    return_to_date: Decimal | None
+
+
 def _d(value: Decimal | int | str | None) -> Decimal:
     if value is None:
         return ZERO
@@ -35,10 +46,21 @@ def _asset_key(activity: Activity) -> str:
     return asset_key_for(activity)
 
 
-def load_activities(session: Session) -> list[Activity]:
-    return list(
-        session.scalars(select(Activity).order_by(Activity.trade_date.asc(), Activity.id.asc()))
-    )
+def load_activities(
+    session: Session,
+    *,
+    account_id: str | None = None,
+) -> list[Activity]:
+    from portmetrics.fifo.engine import UNASSIGNED_ACCOUNT_ID, normalize_account_id
+
+    stmt = select(Activity).order_by(Activity.trade_date.asc(), Activity.id.asc())
+    if account_id is not None:
+        scope = normalize_account_id(account_id)
+        if scope == UNASSIGNED_ACCOUNT_ID:
+            stmt = stmt.where(Activity.account_id.is_(None))
+        else:
+            stmt = stmt.where(Activity.account_id == scope)
+    return list(session.scalars(stmt).all())
 
 
 def price_map(session: Session) -> dict[tuple[str, date], Decimal]:
@@ -190,6 +212,71 @@ def compute_standard_periods(
     ]
 
 
+def compute_annual_returns(
+    activities: list[Activity],
+    prices: dict[tuple[str, date], Decimal],
+    as_of: date | None = None,
+) -> list[AnnualReturn]:
+    """YTD then prior calendar years back to the first activity.
+
+    ``year_return`` closes at year-end (or as-of for YTD).
+    ``return_to_date`` uses the same start but ends at as-of; omitted for YTD
+    because both windows are identical.
+    """
+    if not activities:
+        return []
+    end = as_of or date.today()
+    first = activities[0].trade_date
+    rows: list[AnnualReturn] = []
+    for year in range(end.year, first.year - 1, -1):
+        start = max(first, date(year, 1, 1))
+        if year == end.year:
+            closed = period_return(
+                activities, prices, label="ytd", start=start, end=end
+            )
+            rows.append(
+                AnnualReturn(
+                    label="ytd",
+                    start_date=closed.start_date,
+                    end_date=closed.end_date,
+                    year_return=closed.period_return,
+                    return_to_date=None,
+                )
+            )
+            continue
+        year_end = date(year, 12, 31)
+        if year_end < first:
+            continue
+        closed = period_return(
+            activities, prices, label=str(year), start=start, end=year_end
+        )
+        open_ended = period_return(
+            activities, prices, label=f"{year}_to_date", start=start, end=end
+        )
+        rows.append(
+            AnnualReturn(
+                label=str(year),
+                start_date=closed.start_date,
+                end_date=closed.end_date,
+                year_return=closed.period_return,
+                return_to_date=open_ended.period_return,
+            )
+        )
+    return rows
+
+
+def _annual_return_dict(row: AnnualReturn) -> dict:
+    return {
+        "label": row.label,
+        "start_date": row.start_date.isoformat(),
+        "end_date": row.end_date.isoformat(),
+        "year_return": str(row.year_return) if row.year_return is not None else None,
+        "return_to_date": (
+            str(row.return_to_date) if row.return_to_date is not None else None
+        ),
+    }
+
+
 def cagr(
     activities: list[Activity],
     prices: dict[tuple[str, date], Decimal],
@@ -251,9 +338,15 @@ def nav_series(
     return out
 
 
-def position_simple_return(session: Session, asset_key: str | None = None) -> list[dict]:
-    lots = list_open_lots(session, asset_key=asset_key)
+def position_simple_return(
+    session: Session,
+    asset_key: str | None = None,
+    *,
+    account_id: str | None = None,
+) -> list[dict]:
+    lots = list_open_lots(session, asset_key=asset_key, account_id=account_id)
     by_asset: dict[str, dict[str, Decimal]] = {}
+    meta: dict[str, dict[str, str | None]] = {}
     for lot in lots:
         key = lot["isin"]
         bucket = by_asset.setdefault(
@@ -266,6 +359,14 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
         bucket["invested"] += open_qty * unit_cost
         if lot["market_value"] is not None:
             bucket["market_value"] += _d(lot["market_value"])
+        if key not in meta:
+            meta[key] = {
+                "symbol": lot.get("symbol"),
+                "wkn": lot.get("wkn"),
+                "isin_code": lot.get("isin_code"),
+                "display_name": lot.get("display_name"),
+                "display_id": lot.get("display_id") or key,
+            }
     rows: list[dict] = []
     for key, values in sorted(by_asset.items()):
         invested = values["invested"]
@@ -273,9 +374,15 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
         simple = None
         if invested != 0 and market != 0:
             simple = ((market - invested) / invested).quantize(Decimal("0.0001"))
+        ids = meta.get(key) or {}
         rows.append(
             {
                 "isin": key,
+                "symbol": ids.get("symbol"),
+                "wkn": ids.get("wkn"),
+                "isin_code": ids.get("isin_code"),
+                "display_name": ids.get("display_name"),
+                "display_id": ids.get("display_id") or key,
                 "open_qty": str(values["open_qty"]),
                 "invested": str(invested),
                 "market_value": str(market),
@@ -285,18 +392,40 @@ def position_simple_return(session: Session, asset_key: str | None = None) -> li
     return rows
 
 
-def dividend_summary(activities: list[Activity]) -> dict:
+def dividend_summary(
+    activities: list[Activity],
+    *,
+    as_of: date | None = None,
+) -> dict:
+    """Gross dividend/interest totals (all-time + YTD through as_of)."""
+    end = as_of or date.today()
+    year = end.year
     total = ZERO
+    ytd = ZERO
+    interest_total = ZERO
+    interest_ytd = ZERO
     by_asset: dict[str, Decimal] = {}
     for activity in activities:
-        if activity.type != "DIVIDEND":
+        if activity.trade_date > end:
             continue
         amount = _d(activity.quantity) * _d(activity.unit_price)
-        total += amount
-        key = _asset_key(activity)
-        by_asset[key] = by_asset.get(key, ZERO) + amount
+        in_year = activity.trade_date.year == year
+        if activity.type == "DIVIDEND":
+            total += amount
+            if in_year:
+                ytd += amount
+            key = _asset_key(activity)
+            by_asset[key] = by_asset.get(key, ZERO) + amount
+        elif activity.type == "INTEREST":
+            interest_total += amount
+            if in_year:
+                interest_ytd += amount
     return {
         "total": str(total),
+        "ytd": str(ytd),
+        "interest_total": str(interest_total),
+        "interest_ytd": str(interest_ytd),
+        "year": year,
         "by_isin": [{"isin": k, "amount": str(v)} for k, v in sorted(by_asset.items())],
     }
 
@@ -356,20 +485,105 @@ def rebuild_metrics_daily(session: Session, *, end: date | None = None) -> int:
     return count
 
 
-def overview_payload(session: Session, as_of: date | None = None) -> dict:
-    activities = load_activities(session)
+def overview_payload(
+    session: Session,
+    as_of: date | None = None,
+    *,
+    account_id: str | None = None,
+) -> dict:
+    from decimal import Decimal as D
+
+    from portmetrics.assets.identifiers import enrich_asset_fields, load_identifier_lookups
+    from portmetrics.fifo.engine import UNASSIGNED_ACCOUNT_ID, normalize_account_id
+    from portmetrics.metrics.irr import cashflow_timeline, irr_payload
+    from portmetrics.metrics.risk import position_drawdown, risk_payload
+    from portmetrics.metrics.tax_allowance import tax_allowance_payload
+    from portmetrics.paperless.mapping import get_paperless_settings
+    from portmetrics.settings.portfolio import get_portfolio_settings
+    from portmetrics.sync.accounts import list_accounts
+
+    activities = load_activities(session, account_id=account_id)
     prices = price_map(session)
     end = as_of or date.today()
     periods = compute_standard_periods(activities, prices, as_of=end)
+    annual = compute_annual_returns(activities, prices, as_of=end)
     nav = nav_as_of(activities, prices, end) if activities else ZERO
     contrib, withdr = (
-        cashflows_between(activities, activities[0].trade_date, end)
-        if activities
-        else (ZERO, ZERO)
+        cashflows_between(activities, activities[0].trade_date, end) if activities else (ZERO, ZERO)
     )
     invested = contrib - withdr
+    portfolio_cfg = get_portfolio_settings(session)
+    risk_free = D(portfolio_cfg["risk_free_rate"])
+    preference = portfolio_cfg["asset_id_preference"]
+    lookups = load_identifier_lookups(session)
+    display_id_by_key: dict[str, str] = {}
+    for activity in activities:
+        key = _asset_key(activity)
+        if key in display_id_by_key:
+            continue
+        ids = enrich_asset_fields(
+            asset_key=key,
+            activity_isin=activity.isin,
+            symbol=activity.symbol,
+            preference=preference,
+            lookups=lookups,
+        )
+        display_id_by_key[key] = ids["display_id"] or key
+    mwr = irr_payload(activities, prices, as_of=end)
+    positions = position_simple_return(session, account_id=account_id)
+    for row in positions:
+        key = row["isin"]
+        row["irr"] = irr_payload(activities, prices, as_of=end, asset_key=key).get("irr")
+        row["max_drawdown"] = position_drawdown(activities, prices, key, as_of=end).get(
+            "max_drawdown"
+        )
+
+    scope = None
+    if account_id is not None:
+        scope_id = normalize_account_id(account_id)
+        account_name = None
+        if scope_id != UNASSIGNED_ACCOUNT_ID:
+            for acc in list_accounts(session):
+                if acc["id"] == scope_id:
+                    account_name = acc["name"]
+                    break
+        scope = {
+            "account_id": None if scope_id == UNASSIGNED_ACCOUNT_ID else scope_id,
+            "account_name": account_name or (
+                "Ohne Depot" if scope_id == UNASSIGNED_ACCOUNT_ID else scope_id
+            ),
+        }
+
+    accounts_summary: list[dict] = []
+    if account_id is None:
+        hidden = set(get_paperless_settings(session).get("hidden_account_ids") or [])
+        for acc in list_accounts(session):
+            if acc["id"] in hidden:
+                continue
+            scoped = load_activities(session, account_id=acc["id"])
+            acc_nav = nav_as_of(scoped, prices, end) if scoped else ZERO
+            c_in, c_out = (
+                cashflows_between(scoped, scoped[0].trade_date, end) if scoped else (ZERO, ZERO)
+            )
+            returns = irr_payload(scoped, prices, as_of=end) if scoped else {
+                "irr": None,
+                "simple_return": None,
+            }
+            accounts_summary.append(
+                {
+                    "id": acc["id"],
+                    "name": acc["name"],
+                    "nav": str(acc_nav),
+                    "invested": str(c_in - c_out),
+                    "irr": returns.get("irr"),
+                    "simple_return": returns.get("simple_return"),
+                }
+            )
+
     return {
         "as_of": end.isoformat(),
+        "scope": scope,
+        "accounts_summary": accounts_summary,
         "nav": str(nav),
         "invested": str(invested),
         "unrealized_gain": str(nav - invested),
@@ -386,7 +600,13 @@ def overview_payload(session: Session, as_of: date | None = None) -> dict:
             }
             for p in periods
         ],
+        "annual_returns": [_annual_return_dict(row) for row in annual],
         "cagr": cagr(activities, prices, end=end),
-        "dividends": dividend_summary(activities),
-        "positions": position_simple_return(session),
+        "mwr": mwr,
+        "cashflows": cashflow_timeline(activities, display_id_by_key=display_id_by_key),
+        "risk": risk_payload(activities, prices, as_of=end, risk_free_rate=risk_free),
+        # Tax allowance is always portfolio-wide (one person).
+        "tax_allowance": tax_allowance_payload(session, as_of=end),
+        "dividends": dividend_summary(activities, as_of=end),
+        "positions": positions,
     }

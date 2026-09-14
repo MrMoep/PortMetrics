@@ -7,6 +7,8 @@ Nach Release auf `main`:
 | Tag | Bedeutung |
 |-----|-----------|
 | `ghcr.io/mrmoep/portmetrics:latest` | aktueller `main` |
+| `ghcr.io/mrmoep/portmetrics:dev` | Tip von `dev` (Homelab-Test) |
+| `ghcr.io/mrmoep/portmetrics:1.0.0` | Release 1.0.0 |
 | `ghcr.io/mrmoep/portmetrics:0.2.0` | Release 0.2.0 |
 | `ghcr.io/mrmoep/portmetrics:0.1.0` | Release 0.1.0 |
 | `ghcr.io/mrmoep/portmetrics:<sha>` | kurzer Git-SHA |
@@ -16,7 +18,7 @@ Nach Release auf `main`:
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/mrmoep/portmetrics:0.2.0
+    image: ghcr.io/mrmoep/portmetrics:1.0.0
     ports:
       - "8080:8080"
     env_file: .env
@@ -32,7 +34,10 @@ Lokal bauen (ohne Registry): `docker compose up --build` im Repo-Root.
 ## Voraussetzung
 
 1. PostgreSQL 18 mit DBs `portmetrics` (+ optional `portmetrics_test`)
-2. Schema-Migrationen:
+2. Schema-Migrationen: beim **Container-Start** automatisch (`alembic upgrade head` im Entrypoint).
+   DB muss erreichbar sein, sonst startet die App nicht (Container restarted bis Postgres da ist).
+
+   Nur lokal ohne Docker weiterhin manuell:
 
 ```powershell
 cd api
@@ -40,8 +45,6 @@ $env:APP_ENV="production"
 $env:DATABASE_URL="postgresql+psycopg://user:pass@HOST:5432/portmetrics"
 alembic upgrade head
 ```
-
-(Stand 0.2.0: inkl. `0002_app_settings`.)
 
 3. `.env` aus [`.env.example`](../.env.example) — mind. `DATABASE_URL`, optional Ghostfolio/Paperless.
 4. Optional Reverse Proxy (z. B. Nginx Proxy Manager): Host auf Container-Port `8080` zeigen.
@@ -65,9 +68,9 @@ Field-Mapping und Ghostfolio-Defaults: nach Start unter **Einstellungen** (nicht
 
 ## Erststart
 
-1. Container starten, `/health` prüfen (`version` sollte `0.2.0` sein)
+1. Container starten, `/health` prüfen (`version`: Release `1.0.0`, Dev-Image z. B. `1.0.0-dev · 2026-09-14 16:00`)
 2. Dashboard öffnen (`http://host:8080/` oder die NPM-URL)
-3. **Sync Ghostfolio** → FIFO/Metrics laufen mit
+3. **Sync Ghostfolio** → FIFO/Metrics laufen mit (nach Staging-Confirm passiert der Mirror auch automatisch)
 4. Optional Paperless: Felder unter **Einstellungen** zuordnen, Webhook laut [PAPERLESS.md](PAPERLESS.md)
 
 ## Absicherung

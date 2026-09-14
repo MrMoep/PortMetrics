@@ -41,6 +41,26 @@ class LotStatus(StrEnum):
     CLOSED = "CLOSED"
 
 
+class Account(Base):
+    """Mirrored Ghostfolio account (depot). Source of truth remains Ghostfolio."""
+
+    __tablename__ = "accounts"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    balance: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
+    comment: Mapped[str | None] = mapped_column(Text)
+    platform_id: Mapped[str | None] = mapped_column(Text)
+    platform_name: Mapped[str | None] = mapped_column(Text)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class Activity(Base):
     __tablename__ = "activities"
     __table_args__ = (
@@ -54,7 +74,7 @@ class Activity(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     gf_activity_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), unique=True, nullable=False)
-    account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    account_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     isin: Mapped[str | None] = mapped_column(Text)
     symbol: Mapped[str] = mapped_column(Text, nullable=False)
     type: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -81,6 +101,13 @@ class Lot(Base):
             name="ck_lots_status",
         ),
         Index("ix_lots_isin_open_date", "isin", "open_date"),
+        Index(
+            "ix_lots_account_isin_status_open_date",
+            "account_id",
+            "isin",
+            "status",
+            "open_date",
+        ),
         {"schema": SCHEMA},
     )
 
@@ -90,6 +117,7 @@ class Lot(Base):
         ForeignKey(f"{SCHEMA}.activities.id"),
         nullable=False,
     )
+    account_id: Mapped[str | None] = mapped_column(Text)
     isin: Mapped[str] = mapped_column(Text, nullable=False)
     open_qty: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
     original_qty: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
@@ -178,6 +206,28 @@ class DocumentLink(Base):
     link_type: Mapped[str] = mapped_column(Text, nullable=False, default="source")
 
 
+class AssetIdentifier(Base):
+    """ISIN → WKN / preferred Ghostfolio symbol (table is source of truth)."""
+
+    __tablename__ = "asset_identifiers"
+    __table_args__ = (
+        Index("ix_asset_identifiers_wkn", "wkn"),
+        {"schema": SCHEMA},
+    )
+
+    isin: Mapped[str] = mapped_column(Text, primary_key=True)
+    wkn: Mapped[str | None] = mapped_column(Text)
+    preferred_symbol: Mapped[str | None] = mapped_column(Text)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    paperless_doc_id: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class StagingImport(Base):
     __tablename__ = "staging_imports"
     __table_args__ = (
@@ -201,6 +251,34 @@ class StagingImport(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class DepotTransfer(Base):
+    """Internal depot transfer (not mirrored from Ghostfolio)."""
+
+    __tablename__ = "depot_transfers"
+    __table_args__ = (
+        CheckConstraint(
+            "from_account_id <> to_account_id",
+            name="ck_depot_transfers_distinct_accounts",
+        ),
+        CheckConstraint("quantity > 0", name="ck_depot_transfers_qty_positive"),
+        Index("ix_depot_transfers_date", "transfer_date"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    from_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    to_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    transfer_date: Mapped[date] = mapped_column(Date, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
 
 

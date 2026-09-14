@@ -1,21 +1,42 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from portmetrics.db.models import Activity, Lot, LotConsumption, LotStatus, PriceSnapshot
+from portmetrics.assets.identifiers import (
+    enrich_asset_fields,
+    load_identifier_lookups,
+    paperless_doc_map,
+)
+from portmetrics.db.models import (
+    Account,
+    Activity,
+    DepotTransfer,
+    DocumentLink,
+    Lot,
+    LotConsumption,
+    LotStatus,
+    PriceSnapshot,
+)
 from portmetrics.fifo.engine import (
+    UNASSIGNED_ACCOUNT_ID,
     FifoError,
     LotState,
     SellResult,
     apply_sell,
+    apply_transfer,
     create_lot_from_buy,
     estimate_tax,
+    normalize_account_id,
 )
+from portmetrics.settings.portfolio import get_portfolio_settings
+
+_PAPERLESS_COMMENT_RE = re.compile(r"paperless:(\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -23,14 +44,43 @@ class RebuildResult:
     lots_created: int
     consumptions: int
     activities_processed: int
+    transfers_applied: int = 0
 
 
 def asset_key_for(activity: Activity) -> str:
     return activity.isin or activity.symbol
 
 
+def _persist_lot(session: Session, state: LotState) -> Lot:
+    account_id = None if state.account_id == UNASSIGNED_ACCOUNT_ID else state.account_id
+    row = Lot(
+        activity_id=state.activity_id,
+        account_id=account_id,
+        isin=state.asset_key,
+        open_qty=state.open_qty,
+        original_qty=state.original_qty,
+        cost_basis=state.cost_basis,
+        open_date=state.open_date,
+        status=state.status,
+        closed_at=state.closed_at,
+    )
+    session.add(row)
+    session.flush()
+    state.id = row.id
+    return row
+
+
+def _sync_lot_row(row: Lot, state: LotState) -> None:
+    row.open_qty = state.open_qty
+    row.status = state.status
+    row.closed_at = state.closed_at
+
+
 def rebuild_lots(session: Session) -> RebuildResult:
-    """Full rebuild of lots/consumptions from activities (deterministic)."""
+    """Full rebuild of lots/consumptions from activities + depot transfers."""
+    # Document links keep activity_id; clear lot_id so DELETE FROM lots can run,
+    # then reattach after new lot ids exist.
+    session.execute(update(DocumentLink).values(lot_id=None))
     session.execute(delete(LotConsumption))
     session.execute(delete(Lot))
     session.flush()
@@ -38,77 +88,135 @@ def rebuild_lots(session: Session) -> RebuildResult:
     activities = session.scalars(
         select(Activity).order_by(Activity.trade_date.asc(), Activity.id.asc())
     ).all()
+    transfers = session.scalars(
+        select(DepotTransfer).order_by(
+            DepotTransfer.transfer_date.asc(), DepotTransfer.id.asc()
+        )
+    ).all()
+
+    # Same calendar day: all activities first, then transfers.
+    events: list[tuple[date, int, int, str, Activity | DepotTransfer]] = []
+    for activity in activities:
+        events.append((activity.trade_date, 0, activity.id, "activity", activity))
+    for transfer in transfers:
+        events.append((transfer.transfer_date, 1, transfer.id, "transfer", transfer))
+    events.sort(key=lambda item: (item[0], item[1], item[2]))
 
     open_lots: list[LotState] = []
-    lot_rows: dict[int, Lot] = {}  # activity_id -> Lot ORM for open buys
+    lots_by_id: dict[int, Lot] = {}
     consumptions = 0
+    transfers_applied = 0
 
-    for activity in activities:
-        key = asset_key_for(activity)
-        if activity.type == "BUY":
-            state = create_lot_from_buy(
-                activity_id=activity.id,
-                asset_key=key,
-                quantity=activity.quantity,
-                unit_price=activity.unit_price,
-                fee=activity.fee,
-                trade_date=activity.trade_date,
-            )
-            row = Lot(
-                activity_id=activity.id,
-                isin=key,
-                open_qty=state.open_qty,
-                original_qty=state.original_qty,
-                cost_basis=state.cost_basis,
-                open_date=state.open_date,
-                status=LotStatus.OPEN,
-            )
-            session.add(row)
-            session.flush()
-            state.id = row.id
-            open_lots.append(state)
-            lot_rows[activity.id] = row
-        elif activity.type == "SELL":
-            result = apply_sell(
-                open_lots,
-                asset_key=key,
-                quantity=activity.quantity,
-                unit_price=activity.unit_price,
-                fee=activity.fee,
-                trade_date=activity.trade_date,
-            )
-            for c in result.consumptions:
-                # find lot row by activity_id of the buy
-                buy_lot = lot_rows.get(c.lot_activity_id)
-                if buy_lot is None:
-                    raise FifoError(f"Missing lot for buy activity {c.lot_activity_id}")
-                session.add(
-                    LotConsumption(
-                        sell_activity_id=activity.id,
-                        lot_id=buy_lot.id,
-                        qty_consumed=c.qty_consumed,
-                        proceeds=c.proceeds,
-                        realized_gain=c.realized_gain,
+    for _day, _kind, _eid, etype, payload in events:
+        if etype == "activity":
+            activity = payload  # type: ignore[assignment]
+            assert isinstance(activity, Activity)
+            key = asset_key_for(activity)
+            account_id = normalize_account_id(activity.account_id)
+            if activity.type == "BUY":
+                state = create_lot_from_buy(
+                    activity_id=activity.id,
+                    asset_key=key,
+                    quantity=activity.quantity,
+                    unit_price=activity.unit_price,
+                    fee=activity.fee,
+                    trade_date=activity.trade_date,
+                    account_id=account_id,
+                )
+                row = _persist_lot(session, state)
+                open_lots.append(state)
+                lots_by_id[row.id] = row
+            elif activity.type == "SELL":
+                result = apply_sell(
+                    open_lots,
+                    asset_key=key,
+                    quantity=activity.quantity,
+                    unit_price=activity.unit_price,
+                    fee=activity.fee,
+                    trade_date=activity.trade_date,
+                    account_id=account_id,
+                )
+                for c in result.consumptions:
+                    if c.lot_id is None or c.lot_id not in lots_by_id:
+                        raise FifoError(
+                            f"Missing lot for buy activity {c.lot_activity_id}"
+                        )
+                    buy_lot = lots_by_id[c.lot_id]
+                    session.add(
+                        LotConsumption(
+                            sell_activity_id=activity.id,
+                            lot_id=buy_lot.id,
+                            qty_consumed=c.qty_consumed,
+                            proceeds=c.proceeds,
+                            realized_gain=c.realized_gain,
+                        )
                     )
+                    state = next(
+                        lot for lot in open_lots if lot.id == c.lot_id
+                    )
+                    _sync_lot_row(buy_lot, state)
+                    consumptions += 1
+            # DIVIDEND/FEE/INTEREST ignored for lot tracking in v1
+        else:
+            transfer = payload  # type: ignore[assignment]
+            assert isinstance(transfer, DepotTransfer)
+            result = apply_transfer(
+                open_lots,
+                asset_key=transfer.isin,
+                quantity=transfer.quantity,
+                from_account_id=transfer.from_account_id,
+                to_account_id=transfer.to_account_id,
+                transfer_date=transfer.transfer_date,
+            )
+            for move in result.moves:
+                if move.source_lot_id is None or move.source_lot_id not in lots_by_id:
+                    raise FifoError(
+                        f"Missing source lot for transfer {transfer.id}"
+                    )
+                source_state = next(
+                    lot for lot in open_lots if lot.id == move.source_lot_id
                 )
-                buy_lot.open_qty = next(
-                    lot.open_qty for lot in open_lots if lot.activity_id == c.lot_activity_id
-                )
-                buy_lot.status = next(
-                    lot.status for lot in open_lots if lot.activity_id == c.lot_activity_id
-                )
-                buy_lot.closed_at = next(
-                    lot.closed_at for lot in open_lots if lot.activity_id == c.lot_activity_id
-                )
-                consumptions += 1
-        # DIVIDEND/FEE/INTEREST ignored for lot tracking in v1
+                _sync_lot_row(lots_by_id[move.source_lot_id], source_state)
+            for dest_state in result.new_lots:
+                row = _persist_lot(session, dest_state)
+                lots_by_id[row.id] = row
+            transfers_applied += 1
 
     session.flush()
+    _reattach_document_link_lots(session, lots_by_id)
     return RebuildResult(
-        lots_created=len(lot_rows),
+        lots_created=len(lots_by_id),
         consumptions=consumptions,
         activities_processed=len(activities),
+        transfers_applied=transfers_applied,
     )
+
+
+def _reattach_document_link_lots(
+    session: Session,
+    lots_by_id: dict[int, Lot],
+) -> None:
+    """Restore document_links.lot_id from activity_id after a FIFO rebuild."""
+    by_activity: dict[int, list[Lot]] = {}
+    for lot in lots_by_id.values():
+        by_activity.setdefault(lot.activity_id, []).append(lot)
+
+    links = session.scalars(
+        select(DocumentLink).where(DocumentLink.activity_id.is_not(None))
+    ).all()
+    for link in links:
+        candidates = by_activity.get(int(link.activity_id), [])
+        if not candidates:
+            continue
+        open_candidates = [
+            lot
+            for lot in candidates
+            if lot.status in (LotStatus.OPEN, LotStatus.PARTIAL)
+        ]
+        pool = open_candidates or candidates
+        chosen = sorted(pool, key=lambda lot: (lot.open_date, lot.id))[0]
+        link.lot_id = chosen.id
+    session.flush()
 
 
 def latest_mark_price(session: Session, asset_key: str) -> Decimal | None:
@@ -131,17 +239,97 @@ def latest_mark_price(session: Session, asset_key: str) -> Decimal | None:
     return Decimal(activity.unit_price)
 
 
+def _paperless_doc_from_comment(comment: str | None) -> int | None:
+    if not comment:
+        return None
+    match = _PAPERLESS_COMMENT_RE.search(comment)
+    return int(match.group(1)) if match else None
+
+
+def _lot_paperless_docs(
+    session: Session,
+    lots: list[Lot],
+    activities: dict[int, Activity],
+) -> dict[int, int]:
+    """Resolve paperless_doc_id per lot: DocumentLink → comment → asset map."""
+    if not lots:
+        return {}
+
+    lot_ids = {lot.id for lot in lots}
+    activity_ids = {lot.activity_id for lot in lots}
+    by_lot: dict[int, int] = {}
+    by_activity: dict[int, int] = {}
+
+    links = session.scalars(
+        select(DocumentLink).where(
+            or_(
+                DocumentLink.lot_id.in_(lot_ids),
+                DocumentLink.activity_id.in_(activity_ids),
+            )
+        )
+    ).all()
+    for link in links:
+        if link.lot_id is not None and link.lot_id in lot_ids:
+            by_lot[link.lot_id] = int(link.paperless_doc_id)
+        if link.activity_id is not None:
+            by_activity[link.activity_id] = int(link.paperless_doc_id)
+
+    doc_by_isin = paperless_doc_map(session)
+    resolved: dict[int, int] = {}
+    for lot in lots:
+        doc_id = by_lot.get(lot.id) or by_activity.get(lot.activity_id)
+        if doc_id is None:
+            activity = activities.get(lot.activity_id)
+            doc_id = _paperless_doc_from_comment(activity.comment if activity else None)
+        if doc_id is None:
+            activity = activities.get(lot.activity_id)
+            for key in (
+                activity.isin if activity else None,
+                lot.isin,
+            ):
+                if key and key in doc_by_isin:
+                    doc_id = doc_by_isin[key]
+                    break
+        if doc_id is not None:
+            resolved[lot.id] = doc_id
+    return resolved
+
+
 def list_open_lots(
     session: Session,
     *,
     asset_key: str | None = None,
+    account_id: str | None = None,
     mark_prices: dict[str, Decimal] | None = None,
 ) -> list[dict]:
     stmt = select(Lot).where(Lot.status.in_([LotStatus.OPEN, LotStatus.PARTIAL]))
     if asset_key:
         stmt = stmt.where(Lot.isin == asset_key)
+    if account_id is not None:
+        scope = normalize_account_id(account_id)
+        if scope == UNASSIGNED_ACCOUNT_ID:
+            stmt = stmt.where(Lot.account_id.is_(None))
+        else:
+            stmt = stmt.where(Lot.account_id == scope)
     stmt = stmt.order_by(Lot.isin.asc(), Lot.open_date.asc(), Lot.id.asc())
     rows = session.scalars(stmt).all()
+    activity_ids = {lot.activity_id for lot in rows}
+    activities = {
+        row.id: row
+        for row in session.scalars(select(Activity).where(Activity.id.in_(activity_ids))).all()
+    } if activity_ids else {}
+    account_ids = {
+        normalize_account_id(lot.account_id)
+        for lot in rows
+        if normalize_account_id(lot.account_id) != UNASSIGNED_ACCOUNT_ID
+    }
+    account_names = {
+        row.id: row.name
+        for row in session.scalars(select(Account).where(Account.id.in_(account_ids))).all()
+    } if account_ids else {}
+    lookups = load_identifier_lookups(session)
+    paperless_by_lot = _lot_paperless_docs(session, rows, activities)
+    preference = get_portfolio_settings(session)["asset_id_preference"]
     out: list[dict] = []
     for lot in rows:
         unit_cost = (
@@ -162,11 +350,28 @@ def list_open_lots(
             if unrealized is not None and invested_open != 0
             else None
         )
+        activity = activities.get(lot.activity_id)
+        ids = enrich_asset_fields(
+            asset_key=lot.isin,
+            activity_isin=activity.isin if activity else None,
+            symbol=activity.symbol if activity else None,
+            preference=preference,
+            lookups=lookups,
+        )
+        lot_account = normalize_account_id(lot.account_id)
         out.append(
             {
                 "id": lot.id,
                 "activity_id": lot.activity_id,
+                "account_id": None if lot_account == UNASSIGNED_ACCOUNT_ID else lot_account,
+                "account_name": account_names.get(lot_account),
                 "isin": lot.isin,
+                "symbol": ids["symbol"],
+                "wkn": ids["wkn"],
+                "isin_code": ids["isin_code"],
+                "display_name": ids["display_name"],
+                "display_id": ids["display_id"],
+                "paperless_doc_id": paperless_by_lot.get(lot.id),
                 "open_qty": str(lot.open_qty),
                 "original_qty": str(lot.original_qty),
                 "cost_basis": str(lot.cost_basis),
@@ -186,15 +391,24 @@ def list_open_lots(
     return out
 
 
-def load_open_lot_states(session: Session, asset_key: str) -> list[LotState]:
-    rows = session.scalars(
-        select(Lot)
-        .where(
-            Lot.isin == asset_key,
-            Lot.status.in_([LotStatus.OPEN, LotStatus.PARTIAL]),
-        )
-        .order_by(Lot.open_date.asc(), Lot.id.asc())
-    ).all()
+def load_open_lot_states(
+    session: Session,
+    asset_key: str,
+    *,
+    account_id: str | None = None,
+) -> list[LotState]:
+    stmt = select(Lot).where(
+        Lot.isin == asset_key,
+        Lot.status.in_([LotStatus.OPEN, LotStatus.PARTIAL]),
+    )
+    if account_id is not None:
+        scope = normalize_account_id(account_id)
+        if scope == UNASSIGNED_ACCOUNT_ID:
+            stmt = stmt.where(Lot.account_id.is_(None))
+        else:
+            stmt = stmt.where(Lot.account_id == scope)
+    stmt = stmt.order_by(Lot.open_date.asc(), Lot.id.asc())
+    rows = session.scalars(stmt).all()
     return [
         LotState(
             id=row.id,
@@ -204,6 +418,7 @@ def load_open_lot_states(session: Session, asset_key: str) -> list[LotState]:
             original_qty=Decimal(row.original_qty),
             cost_basis=Decimal(row.cost_basis),
             open_date=row.open_date,
+            account_id=normalize_account_id(row.account_id),
             status=row.status,
             closed_at=row.closed_at,
         )
@@ -219,13 +434,27 @@ def simulate_sell(
     unit_price: Decimal | None = None,
     fee: Decimal = Decimal("0"),
     tax_rate: Decimal = Decimal("0.26375"),
+    account_id: str | None = None,
 ) -> dict:
     mark = unit_price if unit_price is not None else latest_mark_price(session, asset_key)
     if mark is None:
         raise FifoError(f"No mark price available for {asset_key}")
 
-    lots = load_open_lot_states(session, asset_key)
-    # work on copies so DB lots are untouched
+    scope = normalize_account_id(account_id) if account_id is not None else None
+    lots = load_open_lot_states(session, asset_key, account_id=scope)
+    # If no account filter was given and multiple accounts hold the asset,
+    # require an explicit account to avoid cross-depot simulation.
+    if account_id is None:
+        distinct = {lot.account_id for lot in lots}
+        if len(distinct) > 1:
+            raise FifoError(
+                f"Multiple accounts hold {asset_key}; pass account_id to simulate"
+            )
+        if len(distinct) == 1:
+            scope = next(iter(distinct))
+        else:
+            scope = UNASSIGNED_ACCOUNT_ID
+
     working = [
         LotState(
             id=lot.id,
@@ -235,9 +464,11 @@ def simulate_sell(
             original_qty=lot.original_qty,
             cost_basis=lot.cost_basis,
             open_date=lot.open_date,
+            account_id=lot.account_id,
             status=lot.status,
         )
         for lot in lots
+        if lot.account_id == scope
     ]
     result: SellResult = apply_sell(
         working,
@@ -246,10 +477,12 @@ def simulate_sell(
         unit_price=mark,
         fee=fee,
         trade_date=date.today(),
+        account_id=scope,
     )
     tax = estimate_tax(result.realized_gain, tax_rate)
     return {
         "isin": asset_key,
+        "account_id": None if scope == UNASSIGNED_ACCOUNT_ID else scope,
         "quantity": str(quantity),
         "unit_price": str(mark),
         "fee": str(fee),

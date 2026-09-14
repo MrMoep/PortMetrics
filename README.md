@@ -1,6 +1,6 @@
 # PortMetrics
 
-**Version 0.2.0** · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/MrMoep/PortMetrics)
+**Version 1.0.0** · [Changelog](CHANGELOG.md) · [GitHub](https://github.com/MrMoep/PortMetrics)
 
 Self-hosted Portfolio-Analytics für Homelab-Umgebungen. PortMetrics erweitert [Ghostfolio](https://ghostfol.io) um FIFO-Lot-Tracking, Perioden-Renditen und steuerrelevante Auswertungen — mit optionaler Anbindung an [Paperless NGX](https://docs.paperless-ngx.com/) für Wertpapierbelege.
 
@@ -40,6 +40,7 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 | [docs/PAPERLESS.md](docs/PAPERLESS.md) | Custom Fields, Mapping, Webhook |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Branches, lokal testen, CI |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phasen & Future |
+| [docs/DESIGN.md](docs/DESIGN.md) | UI Design System (Terminal / Ledger) |
 
 ## Tech-Stack
 
@@ -56,7 +57,7 @@ Paperless (Belege) → Staging/Review → Ghostfolio (Transaktionen)
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/mrmoep/portmetrics:0.2.0
+    image: ghcr.io/mrmoep/portmetrics:1.0.0
     ports:
       - "8080:8080"
     env_file: .env
@@ -65,7 +66,7 @@ services:
     restart: unless-stopped
 ```
 
-Vorher: DB anlegen, `alembic upgrade head`, `.env` aus [`.env.example`](.env.example). Details: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Vorher: DB anlegen, `.env` aus [`.env.example`](.env.example). Schema-Migrationen laufen beim Container-Start automatisch. Details: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Lokal entwickeln
 
@@ -84,15 +85,16 @@ Branches & CI: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 feature/* → PR → dev → PR → main → Image (GHCR) + Release-Tags
 ```
 
-## Status (0.2.0)
+## Status (1.0.0)
 
 | Phase | Fokus | Stand |
 |-------|-------|-------|
 | 0–4 | Ghostfolio Sync, FIFO, Metriken, Paperless Staging, Dashboard | ✅ (0.1.0) |
 | 0.2 | Field-Mapping UI, Webhook-Ingest, CORS | ✅ |
-| Future | IRR, Freibetrag, Drawdown, … | offen (#7–#14) |
+| 1.0 | Depot-Trennung, IRR/Freibetrag/Drawdown, Asset-Kennungen, Overview-UX | ✅ |
+| Future | Sektoren, Edge Cases, Alerts, Multi-User, Export | offen (#10–#14) |
 
-Im Dashboard erscheint **v0.2.0** unter dem Titel; Klick öffnet das GitHub-Repo.
+Im Dashboard erscheint **v1.0.0** unter dem Titel; Klick öffnet das GitHub-Repo.
 
 ## Hinweis
 

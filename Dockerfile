@@ -10,11 +10,18 @@ RUN npm run build
 FROM python:3.12-slim AS runtime
 WORKDIR /app
 
+ARG PORTMETRICS_CHANNEL=
+ARG PORTMETRICS_BUILT_AT=
+ARG PORTMETRICS_GIT_SHA=
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     WEB_DIST_DIR=/app/web/dist \
-    LOG_DIR=/app/logs
+    LOG_DIR=/app/logs \
+    PORTMETRICS_CHANNEL=${PORTMETRICS_CHANNEL} \
+    PORTMETRICS_BUILT_AT=${PORTMETRICS_BUILT_AT} \
+    PORTMETRICS_GIT_SHA=${PORTMETRICS_GIT_SHA}
 
 RUN mkdir -p /app/logs
 
@@ -26,6 +33,9 @@ RUN pip install /app/api
 
 COPY --from=web-build /web/dist /app/web/dist
 
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 WORKDIR /app/api
 EXPOSE 8080
-CMD ["uvicorn", "portmetrics.main:app", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["/entrypoint.sh"]

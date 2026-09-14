@@ -5,9 +5,10 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from portmetrics.db.models import Activity
+from portmetrics.db.models import Activity, DocumentLink, Lot
 from portmetrics.fifo.engine import FifoError, apply_sell, create_lot_from_buy, estimate_tax
 from portmetrics.fifo.service import list_open_lots, rebuild_lots, simulate_sell
 
@@ -66,6 +67,107 @@ def test_fifo_insufficient_qty_raises() -> None:
         )
 
 
+def test_fifo_sell_spans_multiple_lots() -> None:
+    lots = [
+        create_lot_from_buy(
+            activity_id=1,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            trade_date=date(2023, 1, 1),
+        ),
+        create_lot_from_buy(
+            activity_id=2,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("120"),
+            fee=Decimal("0"),
+            trade_date=date(2024, 1, 1),
+        ),
+    ]
+    result = apply_sell(
+        lots,
+        asset_key="IE00",
+        quantity=Decimal("15"),
+        unit_price=Decimal("150"),
+        trade_date=date(2025, 1, 1),
+    )
+    assert len(result.consumptions) == 2
+    assert result.consumptions[0].qty_consumed == Decimal("10")
+    assert result.consumptions[1].qty_consumed == Decimal("5")
+    assert lots[0].status == "CLOSED"
+    assert lots[0].open_qty == Decimal("0")
+    assert lots[1].status == "PARTIAL"
+    assert lots[1].open_qty == Decimal("5")
+    # 10*(150-100) + 5*(150-120) = 500 + 150
+    assert result.realized_gain == Decimal("650")
+
+
+def test_fifo_fee_reduces_realized_gain() -> None:
+    lots = [
+        create_lot_from_buy(
+            activity_id=1,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            trade_date=date(2023, 1, 1),
+        )
+    ]
+    result = apply_sell(
+        lots,
+        asset_key="IE00",
+        quantity=Decimal("5"),
+        unit_price=Decimal("150"),
+        fee=Decimal("10"),
+        trade_date=date(2025, 1, 1),
+    )
+    # net proceeds 750 - 10 = 740; cost 500 → gain 240
+    assert result.realized_gain == Decimal("240")
+    assert result.proceeds == Decimal("740")
+
+
+def test_fifo_ignores_dividend_and_fee_activities(db_session: Session) -> None:
+    _buy(db_session, qty="10", price="100", day=date(2023, 1, 1))
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="acc",
+            isin="IE00BK5BQT80",
+            symbol="VWCE.DE",
+            type="DIVIDEND",
+            quantity=Decimal("1"),
+            unit_price=Decimal("2.5"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2023, 6, 1),
+        )
+    )
+    db_session.add(
+        Activity(
+            gf_activity_id=uuid4(),
+            account_id="acc",
+            isin="IE00BK5BQT80",
+            symbol="VWCE.DE",
+            type="FEE",
+            quantity=Decimal("1"),
+            unit_price=Decimal("5"),
+            fee=Decimal("0"),
+            currency="EUR",
+            trade_date=date(2023, 7, 1),
+        )
+    )
+    db_session.flush()
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 1
+    assert rebuilt.consumptions == 0
+    assert rebuilt.activities_processed == 3
+    lots = list_open_lots(db_session, asset_key="IE00BK5BQT80")
+    assert len(lots) == 1
+    assert Decimal(lots[0]["open_qty"]) == Decimal("10")
+
+
 def test_estimate_tax_only_on_gains() -> None:
     assert estimate_tax(Decimal("100"), Decimal("0.25")) == Decimal("25.00")
     assert estimate_tax(Decimal("-10"), Decimal("0.25")) == Decimal("0")
@@ -78,10 +180,11 @@ def _buy(
     price: str,
     day: date,
     isin: str = "IE00BK5BQT80",
+    account_id: str | None = "acc",
 ) -> Activity:
     row = Activity(
         gf_activity_id=uuid4(),
-        account_id="acc",
+        account_id=account_id,
         isin=isin,
         symbol="VWCE.DE",
         type="BUY",
@@ -103,10 +206,11 @@ def _sell(
     price: str,
     day: date,
     isin: str = "IE00BK5BQT80",
+    account_id: str | None = "acc",
 ) -> Activity:
     row = Activity(
         gf_activity_id=uuid4(),
-        account_id="acc",
+        account_id=account_id,
         isin=isin,
         symbol="VWCE.DE",
         type="SELL",
@@ -146,3 +250,120 @@ def test_rebuild_lots_and_simulate(db_session: Session) -> None:
     assert len(sim["lots"]) == 1
     assert sim["lots"][0]["buy_activity_id"] is not None
     assert Decimal(sim["estimated_tax"]) > 0
+
+
+def test_rebuild_reattaches_document_links(db_session: Session) -> None:
+    buy = _buy(db_session, qty="10", price="100", day=date(2023, 1, 1))
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 1
+    lot = db_session.scalar(select(Lot).where(Lot.activity_id == buy.id))
+    assert lot is not None
+    old_lot_id = lot.id
+    db_session.add(
+        DocumentLink(
+            paperless_doc_id=42,
+            activity_id=buy.id,
+            lot_id=old_lot_id,
+            link_type="matched",
+        )
+    )
+    db_session.flush()
+
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 1
+    new_lot = db_session.scalar(select(Lot).where(Lot.activity_id == buy.id))
+    assert new_lot is not None
+    assert new_lot.id != old_lot_id
+    link = db_session.scalar(
+        select(DocumentLink).where(DocumentLink.paperless_doc_id == 42)
+    )
+    assert link is not None
+    assert link.activity_id == buy.id
+    assert link.lot_id == new_lot.id
+    listed = list_open_lots(db_session, asset_key="IE00BK5BQT80")
+    assert listed[0]["paperless_doc_id"] == 42
+
+
+def test_fifo_sell_stays_within_account(db_session: Session) -> None:
+    """Same ISIN in two accounts: sell in A must not consume lots from B."""
+    _buy(db_session, qty="10", price="100", day=date(2023, 1, 1), account_id="acc-a")
+    _buy(db_session, qty="10", price="50", day=date(2022, 1, 1), account_id="acc-b")
+    _sell(db_session, qty="5", price="150", day=date(2025, 1, 1), account_id="acc-a")
+    db_session.flush()
+
+    rebuilt = rebuild_lots(db_session)
+    assert rebuilt.lots_created == 2
+    assert rebuilt.consumptions == 1
+
+    lots_a = list_open_lots(db_session, asset_key="IE00BK5BQT80", account_id="acc-a")
+    lots_b = list_open_lots(db_session, asset_key="IE00BK5BQT80", account_id="acc-b")
+    assert len(lots_a) == 1
+    assert Decimal(lots_a[0]["open_qty"]) == Decimal("5")
+    assert lots_a[0]["account_id"] == "acc-a"
+    assert len(lots_b) == 1
+    assert Decimal(lots_b[0]["open_qty"]) == Decimal("10")
+    assert lots_b[0]["account_id"] == "acc-b"
+
+
+def test_fifo_cross_account_sell_insufficient(db_session: Session) -> None:
+    _buy(db_session, qty="10", price="100", day=date(2023, 1, 1), account_id="acc-b")
+    _sell(db_session, qty="5", price="150", day=date(2025, 1, 1), account_id="acc-a")
+    db_session.flush()
+    with pytest.raises(FifoError, match="acc-a"):
+        rebuild_lots(db_session)
+
+
+def test_simulate_sell_requires_account_when_ambiguous(db_session: Session) -> None:
+    _buy(db_session, qty="10", price="100", day=date(2023, 1, 1), account_id="acc-a")
+    _buy(db_session, qty="10", price="100", day=date(2023, 2, 1), account_id="acc-b")
+    rebuild_lots(db_session)
+    with pytest.raises(FifoError, match="account_id"):
+        simulate_sell(
+            db_session,
+            asset_key="IE00BK5BQT80",
+            quantity=Decimal("5"),
+            unit_price=Decimal("160"),
+        )
+    sim = simulate_sell(
+        db_session,
+        asset_key="IE00BK5BQT80",
+        quantity=Decimal("5"),
+        unit_price=Decimal("160"),
+        account_id="acc-a",
+    )
+    assert sim["account_id"] == "acc-a"
+    assert len(sim["lots"]) == 1
+
+
+def test_apply_sell_scopes_by_account_id() -> None:
+    lots = [
+        create_lot_from_buy(
+            activity_id=1,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("100"),
+            fee=Decimal("0"),
+            trade_date=date(2023, 1, 1),
+            account_id="acc-a",
+        ),
+        create_lot_from_buy(
+            activity_id=2,
+            asset_key="IE00",
+            quantity=Decimal("10"),
+            unit_price=Decimal("50"),
+            fee=Decimal("0"),
+            trade_date=date(2022, 1, 1),
+            account_id="acc-b",
+        ),
+    ]
+    result = apply_sell(
+        lots,
+        asset_key="IE00",
+        quantity=Decimal("5"),
+        unit_price=Decimal("150"),
+        trade_date=date(2025, 1, 1),
+        account_id="acc-a",
+    )
+    assert result.consumptions[0].lot_activity_id == 1
+    assert lots[0].open_qty == Decimal("5")
+    assert lots[1].open_qty == Decimal("10")

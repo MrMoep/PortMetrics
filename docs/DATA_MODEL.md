@@ -1,8 +1,8 @@
 # Datenmodell
 
-PostgreSQL-Schema: `portmetrics` (Stand Release **0.2.0**).
+PostgreSQL-Schema: `portmetrics` (Stand Release **1.0.0**).
 
-Migrationen: `api/alembic/versions/` — lokal/Prod mit `alembic upgrade head`.
+Migrationen: `api/alembic/versions/` — im Docker-Image beim Start automatisch (`alembic upgrade head`); lokal ohne Container ggf. manuell.
 
 ## Entity-Relationship (konzeptionell)
 
@@ -17,7 +17,7 @@ activities / lots (n) ←── (n) document_links ──→ paperless doc
 
 ### `activities`
 
-Gespiegelte Transaktionen aus Ghostfolio.
+Gespiegelte Transaktionen aus Ghostfolio. Der Sync upsertet und entfernt Orphans (Activities, deren `gf_activity_id` in Ghostfolio nicht mehr vorkommt).
 
 | Spalte | Typ | Beschreibung |
 |--------|-----|--------------|
@@ -42,6 +42,7 @@ FIFO-Kauf-Pakete.
 |--------|-----|--------------|
 | `id` | BIGSERIAL | PK |
 | `activity_id` | BIGINT | FK → activities (Kauf-Activity) |
+| `account_id` | TEXT | Depot (denormalisiert vom Buy; FIFO-Scope) |
 | `isin` | TEXT | Asset |
 | `open_qty` | NUMERIC(18,8) | Restmenge |
 | `original_qty` | NUMERIC(18,8) | Ursprüngliche Menge |
@@ -66,22 +67,28 @@ Verkauf → verbrauchte Lots.
 
 | Tabelle | Zweck |
 |---------|-------|
-| `price_snapshots` | Tageskurse (isin, price_date, close_price, source) |
+| `accounts` | Gespiegelte Ghostfolio-Konten (`GET /api/v1/account`): id, Name, Währung, Balance, Platform |
+| `depot_transfers` | Interne Depotüberträge (nicht aus Ghostfolio); FIFO wandert Lots mit Einstand/Kaufdatum |
+| `price_snapshots` | Tageskurse aus Ghostfolio (`GET /api/v1/symbol/:ds/:symbol?includeHistoricalData=…`); `isin`-Spalte = Asset-Key (ISIN oder Symbol, wie FIFO/NAV) |
 | `metrics_daily` | Vorberechnete KPIs (nav, invested, mtd_return, ytd_return, …) |
 | `document_links` | Paperless-Dokument ↔ Activity/Lot |
 | `staging_imports` | Review-Queue vor Ghostfolio-Import |
-| `app_settings` | UI-Settings (z. B. Paperless Field-Map) |
+| `asset_identifiers` | ISIN → WKN / preferred_symbol / display_name (Tabelle SoT; WKN gelernt wenn leer; Name nur manuell) |
+| `app_settings` | UI-Settings (z. B. Paperless Field-Map, Anzeige-Kennung) |
 | `sync_state` | Idempotenz, last_sync_at, cursor |
 
 ## FIFO-Algorithmus
 
+FIFO ist **account-scoped**: Partition = `(account_id, asset_key)`.
+Activities ohne `account_id` landen im Pseudo-Depot `__unassigned__`.
+
 ```
 on BUY:
-  create lot(open_qty=qty, cost_basis=qty*price + fee, status=OPEN)
+  create lot(account_id, open_qty=qty, cost_basis=qty*price + fee, status=OPEN)
 
 on SELL:
   remaining = sell_qty
-  for lot in lots.where(isin, status in OPEN|PARTIAL).order_by(open_date ASC):
+  for lot in lots.where(account_id, isin, status in OPEN|PARTIAL).order_by(open_date ASC):
     take = min(remaining, lot.open_qty)
     gain = take * sell_price - take * (lot.cost_basis / lot.original_qty)
     insert lot_consumption(...)
@@ -91,6 +98,8 @@ on SELL:
   assert remaining == 0
 ```
 
+Portfolio-KPIs (NAV, YTD, …) aggregieren weiterhin über alle Accounts; nur Lot-Verbrauch und Realisierung sind depotgetrennt.
+
 ## Edge Cases (v1: manuell)
 
-Teil-Verkäufe, Stock Splits, Depotüberträge, Währungswechsel und Thesaurierer werden in v1 über manuelle Korrektur-Activities abgebildet. Automatische Erkennung ist Future-Scope.
+Teil-Verkäufe, Stock Splits, Währungswechsel und Thesaurierer werden in v1 über manuelle Korrektur-Activities abgebildet. **Depotüberträge** laufen intern über `depot_transfers` (Lot-Migration mit Einstand und Kaufdatum, kein realisierter Gewinn) — nicht als Ghostfolio SELL+BUY.

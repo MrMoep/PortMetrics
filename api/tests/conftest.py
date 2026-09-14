@@ -5,12 +5,15 @@ from collections.abc import Generator
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+import portmetrics.main as main_module
 from portmetrics.config import normalize_database_url
 from portmetrics.db.models import SCHEMA, Base
 from portmetrics.db.session import ensure_schema
+from portmetrics.main import app
 
 
 @pytest.fixture()
@@ -78,3 +81,23 @@ def sample_activity_payload() -> dict:
             "dataSource": "YAHOO",
         },
     }
+
+
+@pytest.fixture()
+def api_db(engine) -> Generator[tuple[TestClient, sessionmaker]]:
+    """TestClient with get_db overridden to the test engine."""
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_db():
+        session = SessionLocal()
+        try:
+            yield session
+            session.commit()
+        finally:
+            session.close()
+
+    app.dependency_overrides[main_module.get_db] = override_db
+    try:
+        yield TestClient(app), SessionLocal
+    finally:
+        app.dependency_overrides.clear()

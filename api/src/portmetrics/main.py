@@ -1,24 +1,37 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Generator
 from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from queue import Empty, SimpleQueue
+from threading import Thread
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from portmetrics import __version__
+from portmetrics.assets.identifiers import (
+    apply_symbol_suggestion,
+    list_identifiers,
+    replace_mappings,
+    serialize_identifier,
+)
+from portmetrics.build_info import built_at, display_version, git_sha, image_channel
 from portmetrics.config import settings, webhook_secret_matches
 from portmetrics.db.models import Activity, SyncState
 from portmetrics.db.session import get_session_factory
 from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import list_open_lots, rebuild_lots, simulate_sell
+from portmetrics.fifo.transfers import create_transfer, delete_transfer, list_transfers
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
 from portmetrics.logging_setup import configure_logging
 from portmetrics.metrics.periods import (
@@ -33,20 +46,37 @@ from portmetrics.metrics.periods import (
 )
 from portmetrics.paperless.client import PaperlessClient, PaperlessError
 from portmetrics.paperless.mapping import (
+    FIELD_ROLE_META,
     FIELD_ROLES,
     get_paperless_settings,
+    has_sync_filters,
     save_paperless_settings,
 )
+from portmetrics.paperless.match import (
+    link_lot_to_document,
+    match_lots_to_documents,
+    preview_link_scope,
+)
 from portmetrics.paperless.staging import (
+    SYNC_MODE_FULL,
+    SYNC_MODE_PARTIAL,
     confirm_staging,
     ingest_paperless_document,
     list_staging,
     parse_paperless_document_id,
     reject_staging,
+    relink_staging_document,
     sync_paperless_documents,
 )
 from portmetrics.scheduler import start_scheduler, stop_scheduler
-from portmetrics.sync.activities import GHOSTFOLIO_SOURCE, sync_ghostfolio_activities
+from portmetrics.settings.overview import get_overview_settings, save_overview_settings
+from portmetrics.settings.portfolio import get_portfolio_settings, save_portfolio_settings
+from portmetrics.sync.accounts import GHOSTFOLIO_ACCOUNTS_SOURCE, list_accounts
+from portmetrics.sync.activities import GHOSTFOLIO_SOURCE
+from portmetrics.sync.mirror import sync_ghostfolio_mirror
+from portmetrics.sync.prices import GHOSTFOLIO_PRICES_SOURCE, price_snapshot_count
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -88,7 +118,7 @@ def get_db() -> Generator[Session]:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "env": settings.app_env, "version": __version__}
+    return {"status": "ok", "env": settings.app_env, "version": display_version()}
 
 
 @app.get("/api/health")
@@ -98,24 +128,63 @@ def api_health() -> dict[str, str]:
 
 @app.get("/api/version")
 def api_version() -> dict[str, str]:
-    return {
+    payload = {
         "name": "PortMetrics",
-        "version": __version__,
+        "version": display_version(),
         "repository": "https://github.com/MrMoep/PortMetrics",
     }
+    channel = image_channel()
+    if channel:
+        payload["channel"] = channel
+    stamp = built_at()
+    if stamp:
+        payload["built_at"] = stamp
+    sha = git_sha()
+    if sha:
+        payload["git_sha"] = sha
+    # Keep package semver available for tooling; UI uses `version`.
+    payload["package_version"] = __version__
+    return payload
 
 
 @app.get("/api/sync/status")
 def sync_status(db: Session = Depends(get_db)) -> dict:
     state = db.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_SOURCE))
+    price_state = db.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_PRICES_SOURCE))
+    account_state = db.scalar(
+        select(SyncState).where(SyncState.source == GHOSTFOLIO_ACCOUNTS_SOURCE)
+    )
     activity_count = db.scalar(select(func.count()).select_from(Activity)) or 0
     return {
         "source": GHOSTFOLIO_SOURCE,
         "activity_count": activity_count,
+        "price_snapshot_count": price_snapshot_count(db),
         "last_sync_at": state.last_sync_at.isoformat() if state and state.last_sync_at else None,
         "checksum": state.checksum if state else None,
         "meta": state.meta if state else None,
+        "prices": {
+            "last_sync_at": (
+                price_state.last_sync_at.isoformat()
+                if price_state and price_state.last_sync_at
+                else None
+            ),
+            "meta": price_state.meta if price_state else None,
+        },
+        "accounts": {
+            "last_sync_at": (
+                account_state.last_sync_at.isoformat()
+                if account_state and account_state.last_sync_at
+                else None
+            ),
+            "meta": account_state.meta if account_state else None,
+        },
     }
+
+
+@app.get("/api/accounts")
+def get_accounts(db: Session = Depends(get_db)) -> dict:
+    accounts = list_accounts(db)
+    return {"count": len(accounts), "accounts": accounts}
 
 
 @app.post("/api/sync/ghostfolio")
@@ -127,21 +196,75 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
         )
     client = GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)
     try:
-        result = sync_ghostfolio_activities(db, client)
-        fifo = rebuild_lots(db)
-        metrics_days = rebuild_metrics_daily(db)
+        mirror = sync_ghostfolio_mirror(db, client)
     except GhostfolioError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except FifoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    result = mirror.activities
+    accounts = mirror.accounts
+    prices = mirror.prices
+    fifo = mirror.fifo
     return {
         "fetched": result.fetched,
         "upserted": result.upserted,
+        "deleted": result.deleted,
+        "prune_skipped": result.prune_skipped,
         "checksum": result.checksum,
+        "accounts_fetched": accounts.fetched,
+        "accounts_upserted": accounts.upserted,
+        "accounts_deleted": accounts.deleted,
+        "price_assets": prices.assets,
+        "price_upserted": prices.upserted,
+        "price_skipped": prices.skipped,
         "lots_created": fifo.lots_created,
         "consumptions": fifo.consumptions,
-        "metrics_days": metrics_days,
+        "metrics_days": mirror.metrics_days,
     }
+
+
+@app.get("/api/transfers")
+def get_transfers(db: Session = Depends(get_db)) -> dict:
+    rows = list_transfers(db)
+    return {"count": len(rows), "transfers": rows}
+
+
+@app.post("/api/transfers")
+def post_transfer(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        from_account_id = str(payload["from_account_id"])
+        to_account_id = str(payload["to_account_id"])
+        isin = str(payload["isin"])
+        quantity = Decimal(str(payload["quantity"]))
+        transfer_date = date.fromisoformat(str(payload["transfer_date"]))
+        comment = payload.get("comment")
+        if comment is not None:
+            comment = str(comment)
+    except (KeyError, Exception) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {exc}") from exc
+    try:
+        return create_transfer(
+            db,
+            from_account_id=from_account_id,
+            to_account_id=to_account_id,
+            isin=isin,
+            quantity=quantity,
+            transfer_date=transfer_date,
+            comment=comment,
+        )
+    except FifoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/api/transfers/{transfer_id}")
+def remove_transfer(transfer_id: int, db: Session = Depends(get_db)) -> dict:
+    try:
+        deleted = delete_transfer(db, transfer_id)
+    except FifoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Transfer not found")
+    return {"deleted": True, "id": transfer_id}
 
 
 @app.post("/api/fifo/rebuild")
@@ -154,15 +277,17 @@ def fifo_rebuild(db: Session = Depends(get_db)) -> dict:
         "lots_created": result.lots_created,
         "consumptions": result.consumptions,
         "activities_processed": result.activities_processed,
+        "transfers_applied": result.transfers_applied,
     }
 
 
 @app.get("/api/lots")
 def get_lots(
     isin: str | None = None,
+    account_id: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict:
-    lots = list_open_lots(db, asset_key=isin)
+    lots = list_open_lots(db, asset_key=isin, account_id=account_id)
     return {"count": len(lots), "lots": lots}
 
 
@@ -176,6 +301,9 @@ def post_simulate_sell(payload: dict, db: Session = Depends(get_db)) -> dict:
         )
         fee = Decimal(str(payload.get("fee", "0")))
         tax_rate = Decimal(str(payload.get("tax_rate", settings.default_tax_rate)))
+        account_id = payload.get("account_id")
+        if account_id is not None:
+            account_id = str(account_id)
     except (KeyError, Exception) as exc:
         raise HTTPException(status_code=400, detail=f"Invalid payload: {exc}") from exc
     try:
@@ -186,14 +314,18 @@ def post_simulate_sell(payload: dict, db: Session = Depends(get_db)) -> dict:
             unit_price=unit_price,
             fee=fee,
             tax_rate=tax_rate,
+            account_id=account_id,
         )
     except FifoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/api/metrics/overview")
-def metrics_overview(db: Session = Depends(get_db)) -> dict:
-    return overview_payload(db)
+def metrics_overview(
+    account_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    return overview_payload(db, account_id=account_id)
 
 
 @app.get("/api/metrics/periods")
@@ -234,8 +366,16 @@ def metrics_nav(
 
 
 @app.get("/api/positions")
-def positions(isin: str | None = None, db: Session = Depends(get_db)) -> dict:
-    return {"positions": position_simple_return(db, asset_key=isin)}
+def positions(
+    isin: str | None = None,
+    account_id: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    return {
+        "positions": position_simple_return(
+            db, asset_key=isin, account_id=account_id
+        )
+    }
 
 
 @app.post("/api/metrics/rebuild")
@@ -268,31 +408,163 @@ def staging_list(status: str | None = None, db: Session = Depends(get_db)) -> di
     return {"count": len(items), "items": items}
 
 
-@app.post("/api/staging/sync")
-def staging_sync(db: Session = Depends(get_db)) -> dict:
+@app.post("/api/staging/sync", response_model=None)
+def staging_sync(
+    mode: str = Query(default=SYNC_MODE_PARTIAL),
+    db: Session = Depends(get_db),
+):
+    """Pull Paperless → staging.
+
+    ``mode=partial`` (default): newest ≤100 docs, JSON result.
+    ``mode=full``: all pages matching filters, NDJSON progress stream.
+    """
+    resolved = (mode or SYNC_MODE_PARTIAL).strip().lower()
+    if resolved not in {SYNC_MODE_PARTIAL, SYNC_MODE_FULL}:
+        raise HTTPException(status_code=400, detail="mode must be 'partial' or 'full'")
+
     client = _paperless_client()
-    try:
-        result = sync_paperless_documents(db, client)
-    except PaperlessError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {
-        "scanned": result.scanned,
-        "upserted": result.upserted,
-        "skipped": result.skipped,
-    }
+    cfg = get_paperless_settings(db)
+    filters_active = has_sync_filters(cfg)
+
+    if resolved == SYNC_MODE_PARTIAL:
+        try:
+            result = sync_paperless_documents(db, client, mode=SYNC_MODE_PARTIAL)
+        except (PaperlessError, ValueError) as exc:
+            raise HTTPException(
+                status_code=502 if isinstance(exc, PaperlessError) else 400,
+                detail=str(exc),
+            ) from exc
+        return {
+            "event": "done",
+            "scanned": result.scanned,
+            "upserted": result.upserted,
+            "skipped": result.skipped,
+            "skip_reasons": result.skip_reasons,
+            "mode": result.mode,
+            "filters_active": result.filters_active,
+        }
+
+    # Full sync: stream progress so the UI can show work is ongoing.
+    queue: SimpleQueue[dict | None] = SimpleQueue()
+    SessionLocal = get_session_factory()
+    paperless_url = settings.paperless_url
+    paperless_token = settings.paperless_token
+
+    def worker() -> None:
+        session = SessionLocal()
+        local_client = PaperlessClient(paperless_url or "", paperless_token or "", timeout=120.0)
+        try:
+            def on_progress(event: dict) -> None:
+                queue.put(event)
+
+            try:
+                result = sync_paperless_documents(
+                    session,
+                    local_client,
+                    mode=SYNC_MODE_FULL,
+                    on_progress=on_progress,
+                )
+                session.commit()
+                queue.put(
+                    {
+                        "event": "done",
+                        "scanned": result.scanned,
+                        "upserted": result.upserted,
+                        "skipped": result.skipped,
+                        "skip_reasons": result.skip_reasons,
+                        "mode": result.mode,
+                        "filters_active": result.filters_active,
+                        "warning": (
+                            None
+                            if filters_active
+                            else "Full sync without tag/document-type filter"
+                        ),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - stream error to client
+                session.rollback()
+                queue.put({"event": "error", "detail": str(exc)})
+        finally:
+            session.close()
+            queue.put(None)
+
+    Thread(target=worker, daemon=True).start()
+
+    def generate() -> Generator[str, None, None]:
+        yield json.dumps(
+            {
+                "event": "start",
+                "mode": SYNC_MODE_FULL,
+                "filters_active": filters_active,
+                "warning": (
+                    None
+                    if filters_active
+                    else "Full sync without filters — large archives may take minutes"
+                ),
+            }
+        ) + "\n"
+        while True:
+            try:
+                item = queue.get(timeout=300)
+            except Empty:
+                yield json.dumps({"event": "error", "detail": "Sync timed out"}) + "\n"
+                break
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={
+            # Discourage intermediary buffering so progress arrives promptly.
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+def _paperless_document_base_url(cfg: dict) -> str | None:
+    public = cfg.get("public_url")
+    if public:
+        return str(public).rstrip("/")
+    if settings.paperless_url:
+        return settings.paperless_url.rstrip("/")
+    return None
 
 
 def _paperless_settings_payload(cfg: dict) -> dict:
     return {
         "roles": list(FIELD_ROLES),
+        "role_meta": list(FIELD_ROLE_META),
         "field_map": cfg["field_map"],
         "tag": cfg["tag"],
+        "sync_tags": cfg.get("sync_tags") or [],
+        "sync_document_types": cfg.get("sync_document_types") or [],
         "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
         "ghostfolio_data_source": cfg["ghostfolio_data_source"],
+        "hidden_account_ids": cfg.get("hidden_account_ids") or [],
+        "public_url": cfg.get("public_url"),
+        "document_base_url": _paperless_document_base_url(cfg),
         "paperless_configured": bool(settings.paperless_url and settings.paperless_token),
         "webhook_secret_configured": bool(settings.paperless_webhook_secret),
         "webhook_path": "/api/webhooks/paperless",
         "paperless_sync_interval_minutes": settings.paperless_sync_interval_minutes,
+        "notes": {
+            "trade_date": "Handelsdatum = Paperless-Dokumentdatum (created), kein Custom Field.",
+            "currency": "Währung aus Monetary-Feldern Kurs/Entgelte (z.B. EUR152.34).",
+            "symbol": (
+                "Ghostfolio-Import nutzt preferred_symbol aus Kennungs-Tabelle "
+                "(Einstellungen → Assets); ISIN bleibt kanonisch."
+            ),
+            "public_url": "Browser-URL für Doc-Links; Fallback PAPERLESS_URL (Env).",
+            "sync_filters": (
+                "Teilsync: neueste ≤100 Docs. Full Sync: alle Seiten. "
+                "Filter: mehrere Tags = ODER, mehrere Dokumententypen = ODER; "
+                "Tags und Typen zusammen = UND. Webhook nutzt den Filter nicht, "
+                "prüft aber weiterhin Pflichtfelder."
+            ),
+        },
     }
 
 
@@ -308,6 +580,68 @@ def settings_paperless_put(payload: dict, db: Session = Depends(get_db)) -> dict
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _paperless_settings_payload(cfg)
+
+
+@app.get("/api/settings/portfolio")
+def settings_portfolio_get(db: Session = Depends(get_db)) -> dict:
+    return get_portfolio_settings(db)
+
+
+@app.put("/api/settings/portfolio")
+def settings_portfolio_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        return save_portfolio_settings(db, payload)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/settings/overview")
+def settings_overview_get(db: Session = Depends(get_db)) -> dict:
+    return get_overview_settings(db)
+
+
+@app.put("/api/settings/overview")
+def settings_overview_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        return save_overview_settings(db, payload if isinstance(payload, dict) else {})
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/settings/assets")
+def settings_assets_get(db: Session = Depends(get_db)) -> dict:
+    return {"items": list_identifiers(db)}
+
+
+@app.put("/api/settings/assets")
+def settings_assets_put(payload: dict, db: Session = Depends(get_db)) -> dict:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="items must be a list")
+    try:
+        saved = replace_mappings(db, items)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"items": saved}
+
+
+@app.post("/api/settings/assets/apply-suggestion")
+def settings_assets_apply_suggestion(payload: dict, db: Session = Depends(get_db)) -> dict:
+    try:
+        row = apply_symbol_suggestion(
+            db,
+            isin=str(payload.get("isin") or ""),
+            symbol=payload.get("symbol"),
+            wkn=payload.get("wkn"),
+            paperless_doc_id=(
+                int(payload["paperless_doc_id"])
+                if payload.get("paperless_doc_id") is not None
+                else None
+            ),
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return serialize_identifier(row)
 
 
 @app.get("/api/settings/paperless/custom-fields")
@@ -331,16 +665,50 @@ def settings_paperless_custom_fields() -> dict:
     }
 
 
+def _id_name_list(items: list[dict]) -> list[dict]:
+    return [
+        {"id": int(item["id"]), "name": item.get("name") or f"#{item['id']}"}
+        for item in items
+        if item.get("id") is not None
+    ]
+
+
+@app.get("/api/settings/paperless/tags")
+def settings_paperless_tags() -> dict:
+    client = _paperless_client()
+    try:
+        tags = client.list_tags()
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = _id_name_list(tags)
+    return {"count": len(rows), "tags": rows}
+
+
+@app.get("/api/settings/paperless/document-types")
+def settings_paperless_document_types() -> dict:
+    client = _paperless_client()
+    try:
+        types = client.list_document_types()
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    rows = _id_name_list(types)
+    return {"count": len(rows), "document_types": rows}
+
+
 @app.post("/api/settings/paperless/test")
 def settings_paperless_test() -> dict:
     client = _paperless_client()
     try:
         fields = client.list_custom_fields()
+        tags = client.list_tags()
+        doc_types = client.list_document_types()
     except PaperlessError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
         "ok": True,
         "custom_field_count": len(fields),
+        "tag_count": len(tags),
+        "document_type_count": len(doc_types),
         "url": settings.paperless_url,
     }
 
@@ -368,8 +736,7 @@ async def webhook_paperless(
         except Exception:
             payload = {}
     elif (
-        "application/x-www-form-urlencoded" in content_type
-        or "multipart/form-data" in content_type
+        "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type
     ):
         form = await request.form()
         payload = dict(form)
@@ -397,6 +764,11 @@ async def webhook_paperless(
         "action": result.action,
         "reason": result.reason,
         "staging_id": result.staging_id,
+        "hint": (
+            "Dokument übersprungen — Pflichtfelder prüfen (ISIN/Typ/Kurs) oder Mapping."
+            if result.action == "skipped"
+            else None
+        ),
     }
 
 
@@ -407,11 +779,23 @@ def staging_confirm(staging_id: int, db: Session = Depends(get_db)) -> dict:
     if settings.paperless_url and settings.paperless_token:
         paperless = PaperlessClient(settings.paperless_url, settings.paperless_token)
     try:
-        return confirm_staging(db, staging_id, ghostfolio, paperless)
+        result = confirm_staging(db, staging_id, ghostfolio, paperless)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GhostfolioError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Silent best-effort mirror so Lots/Overview update without a manual Sync click.
+    try:
+        sync_ghostfolio_mirror(db, ghostfolio)
+        relink_staging_document(db, staging_id)
+    except (GhostfolioError, FifoError) as exc:
+        logger.warning("post-confirm Ghostfolio mirror failed: %s", exc)
+    except Exception:
+        logger.exception("post-confirm Ghostfolio mirror failed unexpectedly")
+    return result
 
 
 @app.post("/api/staging/{staging_id}/reject")
@@ -420,6 +804,85 @@ def staging_reject(staging_id: int, db: Session = Depends(get_db)) -> dict:
         return reject_staging(db, staging_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/paperless/link-preview")
+def paperless_link_preview(db: Session = Depends(get_db)) -> dict:
+    """Preview filtered Paperless doc count and unlinked lot count (cheap)."""
+    client = _paperless_client()
+    try:
+        preview = preview_link_scope(db, client)
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "document_count": preview.document_count,
+        "unlinked_lots": preview.unlinked_lots,
+        "filters_active": preview.filters_active,
+        "warn_no_filter": preview.warn_no_filter,
+        "warn_large": preview.warn_large,
+        "warning": preview.warning,
+    }
+
+
+@app.post("/api/staging/match-activities")
+def staging_match_activities(db: Session = Depends(get_db)) -> dict:
+    """Link unlinked FIFO lots to filtered Paperless docs (no GF import)."""
+    client = _paperless_client()
+    try:
+        result = match_lots_to_documents(db, client)
+    except (PaperlessError, ValueError) as exc:
+        raise HTTPException(
+            status_code=502 if isinstance(exc, PaperlessError) else 400,
+            detail=str(exc),
+        ) from exc
+    logger.info(
+        "paperless lot match: scanned=%s matched=%s ambiguous=%s unmatched=%s skipped=%s",
+        result.scanned,
+        result.matched,
+        result.ambiguous,
+        result.unmatched,
+        result.skipped,
+    )
+    return {
+        "scanned": result.scanned,
+        "matched": result.matched,
+        "ambiguous": result.ambiguous,
+        "unmatched": result.unmatched,
+        "skipped": result.skipped,
+        "items": result.items,
+    }
+
+
+class LotDocumentLinkBody(BaseModel):
+    paperless_doc_id: int | None = None
+    paperless_ref: str | None = Field(
+        default=None,
+        description="Document id or Paperless URL containing /documents/<id>",
+    )
+
+
+@app.post("/api/lots/{lot_id}/link-document")
+def lots_link_document(
+    lot_id: int,
+    body: LotDocumentLinkBody,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manually link a Paperless document id/URL to a FIFO lot."""
+    client = _paperless_client()
+    try:
+        return link_lot_to_document(
+            db,
+            client,
+            lot_id=lot_id,
+            paperless_doc_id=body.paperless_doc_id,
+            paperless_ref=body.paperless_ref,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PaperlessError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 if WEB_DIST.is_dir():

@@ -2,6 +2,25 @@
 
 > Tracking: [GitHub Issues](https://github.com/MrMoep/PortMetrics/issues). Release-Historie: [CHANGELOG.md](../CHANGELOG.md).
 
+## v1.0.0 (released)
+
+Stabiles Major-Release: Depot-Trennung Ende-zu-Ende, Metriken und Ghostfolio/Paperless-UX.
+
+| Issue / Thema | Beschreibung | Stand |
+|---------------|--------------|-------|
+| [#7](https://github.com/MrMoep/PortMetrics/issues/7) | IRR / Geldgewichtete Rendite | ✅ |
+| [#8](https://github.com/MrMoep/PortMetrics/issues/8) | Steuer-Freibetrag Tracker | ✅ |
+| [#9](https://github.com/MrMoep/PortMetrics/issues/9) | Drawdown / Volatilität | ✅ |
+| [#51](https://github.com/MrMoep/PortMetrics/issues/51) | Einstellungen: Subnav (Portfolio / Paperless / Ops) | ✅ |
+| [#57](https://github.com/MrMoep/PortMetrics/issues/57) | Preferred Symbol (ISIN → Ticker) | ✅ |
+| [#58](https://github.com/MrMoep/PortMetrics/issues/58) | Sync Orphan-Prune (GF gelöscht → lokal weg) | ✅ |
+| [#77](https://github.com/MrMoep/PortMetrics/issues/77) | Overview: Kennzahlen auswählbar und sortierbar | ✅ |
+| — | Ghostfolio Account-Sync (Depot-Namen) | ✅ |
+| [#67](https://github.com/MrMoep/PortMetrics/issues/67) | Account-scoped FIFO (Depot-Trennung) | ✅ |
+| — | Interne Depotüberträge (Lot-Migration) | ✅ |
+| — | UI Gesamt → Depot → Position | ✅ |
+| — | Overview Spalten-Layout (keine Grid-Lücken) | ✅ |
+
 ## v0.2.0 (released)
 
 | Issue | Beschreibung | Stand |
@@ -29,18 +48,17 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 | [#15](https://github.com/MrMoep/PortMetrics/issues/15) | Single Container + Scaffolding | ✅ |
 | [#6](https://github.com/MrMoep/PortMetrics/issues/6) | PostgreSQL Schema + Migrationen | ✅ |
 
-## Future / nach 0.2
+## Future / nach 1.0
 
-| Issue | Beschreibung | Priorität |
-|-------|--------------|-----------|
-| [#7](https://github.com/MrMoep/PortMetrics/issues/7) | IRR / Geldgewichtete Rendite | P2 |
-| [#8](https://github.com/MrMoep/PortMetrics/issues/8) | Steuer-Freibetrag Tracker | P2 |
-| [#9](https://github.com/MrMoep/PortMetrics/issues/9) | Drawdown / Volatilität | P2 |
-| [#10](https://github.com/MrMoep/PortMetrics/issues/10) | Sektor-Allokation (Ghostfolio einbetten) | P2 |
-| [#11](https://github.com/MrMoep/PortMetrics/issues/11) | Edge Cases (Splits, Überträge, Währung) | P2 |
-| [#12](https://github.com/MrMoep/PortMetrics/issues/12) | Alerts & Benachrichtigungen | P3 |
-| [#13](https://github.com/MrMoep/PortMetrics/issues/13) | Multi-User / Multi-Portfolio | P3 |
-| [#14](https://github.com/MrMoep/PortMetrics/issues/14) | Export (CSV/PDF) für Steuerberater | P3 |
+| Issue | Beschreibung | Priorität | Stand |
+|-------|--------------|-----------|-------|
+| [#10](https://github.com/MrMoep/PortMetrics/issues/10) | Sektor-Allokation (Ghostfolio einbetten) | P2 | |
+| [#11](https://github.com/MrMoep/PortMetrics/issues/11) | Edge Cases (Splits, Überträge, Währung) | P2 | |
+| [#12](https://github.com/MrMoep/PortMetrics/issues/12) | Alerts & Benachrichtigungen | P3 | |
+| [#13](https://github.com/MrMoep/PortMetrics/issues/13) | Multi-User / Multi-Portfolio | P3 | |
+| [#14](https://github.com/MrMoep/PortMetrics/issues/14) | Export (CSV/PDF) für Steuerberater | P3 | |
+
+Price-Sync-Grundlage: Ghostfolio → `price_snapshots` (PR #40).
 
 ## v0.1 Must-Have Kennzahlen
 

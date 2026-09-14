@@ -10,7 +10,9 @@ from portmetrics.db.session import get_engine, session_scope
 from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import rebuild_lots
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
+from portmetrics.sync.accounts import sync_ghostfolio_accounts
 from portmetrics.sync.activities import sync_ghostfolio_activities
+from portmetrics.sync.prices import sync_ghostfolio_prices
 
 
 def cmd_sync_ghostfolio() -> int:
@@ -21,7 +23,14 @@ def cmd_sync_ghostfolio() -> int:
     client = GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)
     try:
         with session_scope(engine) as session:
+            accounts = sync_ghostfolio_accounts(session, client)
             result = sync_ghostfolio_activities(session, client)
+            prices = sync_ghostfolio_prices(
+                session,
+                client,
+                history_days=settings.ghostfolio_price_history_days,
+                default_data_source=settings.ghostfolio_data_source,
+            )
             fifo = rebuild_lots(session)
     except GhostfolioError as exc:
         print(f"sync failed: {exc}", file=sys.stderr)
@@ -30,8 +39,11 @@ def cmd_sync_ghostfolio() -> int:
         print(f"fifo rebuild failed: {exc}", file=sys.stderr)
         return 1
     print(
-        f"synced ghostfolio activities: fetched={result.fetched} "
-        f"upserted={result.upserted} checksum={result.checksum} "
+        f"synced ghostfolio: accounts={accounts.upserted}/{accounts.fetched} "
+        f"activities fetched={result.fetched} "
+        f"upserted={result.upserted} deleted={result.deleted} "
+        f"prune_skipped={result.prune_skipped} checksum={result.checksum} "
+        f"prices={prices.upserted}/{prices.assets} "
         f"lots={fifo.lots_created} consumptions={fifo.consumptions}"
     )
     return 0

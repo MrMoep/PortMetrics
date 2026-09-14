@@ -1,5 +1,52 @@
 # Changelog
 
+## [Unreleased]
+
+## [1.0.0] — 2026-09-14
+
+Erstes stabiles Major-Release: Depot-Trennung, Metriken-Feinschliff und Ghostfolio/Paperless-UX über 0.2.0.
+
+### Features
+- Ghostfolio-Settings: Default-Depot als Namens-Dropdown; Depots in Overview ausblendbar; Depot-Karten rechts kompakt mit IRR/einfacher Rendite
+- UI-Hierarchie **Gesamt → Depot → Position** (Hash-Routing, Depot-Karten, Positions-Detail); Overview scoped via `?account_id=`; Freibetrag bleibt portfolio-weit
+- Interne **Depotüberträge** (`depot_transfers`): Lots wandern mit Einstand/Kaufdatum, kein realisierter Gewinn; `GET/POST/DELETE /api/transfers`
+- **Account-scoped FIFO**: Lots/Verkäufe nur innerhalb desselben Ghostfolio-Kontos (#67); `lots.account_id`, Filter `?account_id=` auf Lots/Positionen/Simulator
+- Ghostfolio-**Account-Sync**: Konten (Depots) werden gespiegelt (`accounts`); `GET /api/accounts`; Teil des Mirror-/Scheduler-/Worker-Syncs
+- Overview: Kennzahlen ein-/ausblenden, sortieren und Hero wählen (persistiert unter `app_settings.overview`); Panel-Link „Anpassen“ (#77)
+- Overview-Layout: unabhängige Spalten-Stacks (Kennzahlen → Cashflow; Perioden → Jahres-Rendite → Depots)
+- Kennungs-Tabelle ISIN/WKN/preferred Symbol (Einstellungen → Assets); Paperless-Confirm blockiert ohne Mapping; Historien-Vorschlag + Staging-Deep-Link (#57)
+- Ghostfolio-Sync **Orphan-Prune**: lokal fehlende GF-Activities werden entfernt; Staging `imported` → `pending`; Statuszeile zeigt gelöschte Anzahl
+- Optional `display_name` in Kennungs-Tabelle; Anzeige-Präferenz `name` (Fallback Symbol), Default bleibt `symbol`
+- Nach Staging-**Confirm** läuft automatisch ein stiller Ghostfolio-Mirror (Activities → Preise → FIFO → Metrics), damit Lots/Overview ohne manuellen Sync aktuell sind
+- Belege-Verknüpfen: unverknüpfte FIFO-Lots → gefilterte Paperless-Docs; Scope-Preview (Count/Warnung) auch für Full Sync; Staging wird bei Match auf `imported` gesetzt
+- FIFO-Lots: Strich in Beleg-Spalte öffnet Maske für manuelle Doc-ID/URL-Verknüpfung
+- Paperless-Icon: Marken-Silhouette (monochrom) statt generischem Dokument-Symbol
+- IRR / geldgewichtete Rendite (#7), Steuer-Freibetrag Tracker (#8), Drawdown / Volatilität (#9)
+
+### Fixed
+- Assets-Tabelle nutzt volle Panel-Breite; Staging→Tabelle übernimmt ISIN/WKN (und Symbol-Vorschlag) in den Entwurf
+- Anzeige-Kennung (Name/WKN/ISIN) löst auch über Preferred Symbol auf, wenn Ghostfolio-Activities keine ISIN haben
+- Lots/Positionen: Spaltenkopf fest „Asset“ (unabhängig von der Anzeige-Präferenz)
+- Paperless-Sync: Skip-Gründe aggregiert (Log + Statuszeile); Select-Feld `Typ` und WKN-only Docs werden akzeptiert
+- Paperless Select-`Typ`: Option-IDs (`SXXG…`) werden über Custom-Field-Definition auf Labels (`BUY`/…) gemappt
+- Belege-Verknüpfen: Identity-Match über Kennungs-Tabelle (Paperless-ISIN/WKN ↔ Ghostfolio preferred_symbol)
+- Belege-Verknüpfen: Datums-Toleranz ±1 Tag (Paperless-`created` oft einen Kalendertag neben GF-Handelsdatum)
+- FIFO-Rebuild: `document_links.lot_id` vor Lot-DELETE lösen und nach Rebuild per `activity_id` neu setzen (behebt Stunden-Sync-FK-Fehler)
+
+### Changed
+- Paperless-Mapping vereinfacht: Pflicht/Optional in der UI; Rollen `type`, `isin`, `wkn`, `quantity`, `unit_price`, `fee`
+- Handelsdatum = Paperless-Dokumentdatum; Währung aus Monetary-Feldern; Ghostfolio-Import-Symbol = preferred_symbol (nicht roh ISIN)
+- Typ `OTHER` im Staging sichtbar, Confirm gesperrt; kein Paperless-Write-back für Import-Status/Activity-ID
+- Price-Sync nutzt preferred_symbol aus der Kennungs-Tabelle, wenn gesetzt
+
+### Deployment
+- Image: `ghcr.io/mrmoep/portmetrics:1.0.0` (auch `:latest` auf `main`)
+- Migrationen bis `0009_depot_transfers` erforderlich (`alembic upgrade head`, läuft beim Container-Start)
+- Keine neuen Pflicht-Env-Variablen gegenüber 0.2.0
+
+### Hinweis
+Steuerwerte sind **Schätzungen**, keine Steuerberatung.
+
 ## [0.2.0] — 2026-09-09
 
 Paperless-UX und Homelab-Feinschliff über 0.1.0.

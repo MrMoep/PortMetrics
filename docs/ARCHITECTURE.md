@@ -33,7 +33,7 @@ Für Homelab/Unraid reicht **ein** Container. API, Frontend und Worker laufen im
 ```yaml
 services:
   portmetrics:
-    image: ghcr.io/mrmoep/portmetrics:0.2.0   # oder :latest
+    image: ghcr.io/mrmoep/portmetrics:1.0.0   # oder :latest
     ports:
       - "8080:8080"
     env_file: .env
@@ -61,10 +61,10 @@ Die Trennung API / Worker / Web wäre sauber skalierbar, ist für einen Nutzer u
 
 | Datentyp | Quelle |
 |----------|--------|
-| Transaktionen | Ghostfolio |
+| Transaktionen | Ghostfolio (PortMetrics spiegelt; Sync entfernt lokale Activities, die in GF fehlen) |
 | Belege | Paperless |
 | FIFO-Lots, Perioden-KPIs | PostgreSQL (abgeleitet) |
-| Tageskurse | Ghostfolio → gespiegelt in `price_snapshots` |
+| Tageskurse | Ghostfolio `GET /api/v1/symbol/:dataSource/:symbol?includeHistoricalData=…` → `price_snapshots` (beim Activity-Sync) |
 
 Paperless ist **nicht** das Ledger — Extraktionsfehler werden im Staging abgefangen, bevor sie Ghostfolio erreichen. Setup der Custom Fields: [PAPERLESS.md](PAPERLESS.md).
 
@@ -75,5 +75,7 @@ Finanzdaten nicht öffentlich exponieren. Empfohlen: Reverse Proxy (NPM/Traefik)
 ## Idempotenz
 
 - `gf_activity_id` als Unique Key für Activities
+- Ghostfolio-Sync: Upsert + **Orphan-Prune** (lokal löschen, was in GF fehlt). Guardrail: leere GF-Antwort bei vorhandenem lokalem Bestand → kein Prune (`prune_skipped`)
+- Betroffene Staging-Einträge (`imported`) werden auf `pending` zurückgesetzt (erneutes Confirm möglich)
 - `paperless_document_id` als Unique Key für Staging-Imports
 - `sync_state` Tabelle für Cursor und Checksums pro Quelle
