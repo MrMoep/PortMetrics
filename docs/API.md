@@ -7,8 +7,9 @@ Basis-URL im Container: `http://host:8080`
 | `GET` | `/health` | Status, `env`, `version` |
 | `GET` | `/api/health` | Alias |
 | `GET` | `/api/version` | `version` + `repository` |
-| `GET` | `/api/sync/status` | Ghostfolio-Sync-Stand |
-| `POST` | `/api/sync/ghostfolio` | Sync + Orphan-Prune + FIFO + Metrics (`deleted`, `prune_skipped` in Response) |
+| `GET` | `/api/sync/status` | Ghostfolio-Sync-Stand (Activities, Prices, Accounts) |
+| `POST` | `/api/sync/ghostfolio` | Sync Accounts + Activities + Orphan-Prune + FIFO + Metrics |
+| `GET` | `/api/accounts` | Gespiegelte Ghostfolio-Konten (Depots) |
 | `POST` | `/api/fifo/rebuild` | FIFO neu berechnen |
 | `GET` | `/api/lots` | Offene Lots (`?isin=`) |
 | `POST` | `/api/simulate/sell` | What-If Verkauf |

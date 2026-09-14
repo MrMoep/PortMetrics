@@ -41,6 +41,26 @@ class LotStatus(StrEnum):
     CLOSED = "CLOSED"
 
 
+class Account(Base):
+    """Mirrored Ghostfolio account (depot). Source of truth remains Ghostfolio."""
+
+    __tablename__ = "accounts"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="EUR")
+    balance: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False, default=Decimal("0"))
+    comment: Mapped[str | None] = mapped_column(Text)
+    platform_id: Mapped[str | None] = mapped_column(Text)
+    platform_name: Mapped[str | None] = mapped_column(Text)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class Activity(Base):
     __tablename__ = "activities"
     __table_args__ = (

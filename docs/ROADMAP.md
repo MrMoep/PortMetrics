@@ -40,6 +40,7 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 | [#57](https://github.com/MrMoep/PortMetrics/issues/57) | Preferred Symbol (ISIN → Ticker) | P1 | ✅ |
 | [#58](https://github.com/MrMoep/PortMetrics/issues/58) | Sync Orphan-Prune (GF gelöscht → lokal weg) | P1 | ✅ |
 | [#77](https://github.com/MrMoep/PortMetrics/issues/77) | Overview: Kennzahlen auswählbar und sortierbar | P1 | ✅ |
+| — | Ghostfolio Account-Sync (Depot-Namen) | P2 | ✅ |
 
 ## Future / nach 0.2
 
