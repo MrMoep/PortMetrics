@@ -543,6 +543,7 @@ def _paperless_settings_payload(cfg: dict) -> dict:
         "sync_document_types": cfg.get("sync_document_types") or [],
         "ghostfolio_default_account_id": cfg["ghostfolio_default_account_id"],
         "ghostfolio_data_source": cfg["ghostfolio_data_source"],
+        "hidden_account_ids": cfg.get("hidden_account_ids") or [],
         "public_url": cfg.get("public_url"),
         "document_base_url": _paperless_document_base_url(cfg),
         "paperless_configured": bool(settings.paperless_url and settings.paperless_token),

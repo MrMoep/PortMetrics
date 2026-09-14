@@ -117,6 +117,8 @@ def empty_paperless_settings() -> dict[str, Any]:
         "ghostfolio_data_source": settings.ghostfolio_data_source,
         # Browser-reachable Paperless UI base (npm/local); API URL often stays Docker-internal.
         "public_url": None,
+        # Account IDs hidden from Overview depot cards (still usable elsewhere).
+        "hidden_account_ids": [],
     }
 
 
@@ -153,7 +155,29 @@ def get_paperless_settings(session: Session) -> dict[str, Any]:
     source = merged.get("ghostfolio_data_source") or settings.ghostfolio_data_source
     merged["ghostfolio_data_source"] = str(source).strip() or settings.ghostfolio_data_source
     merged["public_url"] = _normalize_public_url(merged.get("public_url"))
+    try:
+        merged["hidden_account_ids"] = _normalize_account_id_list(
+            merged.get("hidden_account_ids")
+        )
+    except ValueError:
+        merged["hidden_account_ids"] = []
     return merged
+
+
+def _normalize_account_id_list(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("hidden_account_ids must be a list")
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
 
 
 def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[str, Any]:
@@ -185,6 +209,10 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
     )
     data_source = payload.get("ghostfolio_data_source", current["ghostfolio_data_source"])
     public_url = payload.get("public_url", current["public_url"])
+    if "hidden_account_ids" in payload:
+        hidden_account_ids = _normalize_account_id_list(payload.get("hidden_account_ids"))
+    else:
+        hidden_account_ids = list(current.get("hidden_account_ids") or [])
 
     value = {
         "field_map": field_map,
@@ -200,6 +228,7 @@ def save_paperless_settings(session: Session, payload: dict[str, Any]) -> dict[s
             else settings.ghostfolio_data_source
         ),
         "public_url": _normalize_public_url(public_url),
+        "hidden_account_ids": hidden_account_ids,
     }
     row = session.get(AppSetting, PAPERLESS_SETTINGS_KEY)
     if row is None:

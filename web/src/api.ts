@@ -9,6 +9,8 @@ export type Overview = {
     name: string;
     nav: string;
     invested: string;
+    irr?: string | null;
+    simple_return?: string | null;
   }>;
   nav: string;
   invested: string;
@@ -201,6 +203,7 @@ export type PaperlessSettings = {
   sync_document_types?: PaperlessIdName[];
   ghostfolio_default_account_id: string | null;
   ghostfolio_data_source: string;
+  hidden_account_ids?: string[];
   public_url?: string | null;
   document_base_url?: string | null;
   paperless_configured: boolean;
@@ -386,6 +389,7 @@ export const api = {
     sync_document_types?: PaperlessIdName[];
     ghostfolio_default_account_id?: string | null;
     ghostfolio_data_source?: string;
+    hidden_account_ids?: string[];
     public_url?: string | null;
   }) =>
     request<PaperlessSettings>("/api/settings/paperless", {

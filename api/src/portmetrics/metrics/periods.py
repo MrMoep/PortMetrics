@@ -498,6 +498,7 @@ def overview_payload(
     from portmetrics.metrics.irr import cashflow_timeline, irr_payload
     from portmetrics.metrics.risk import position_drawdown, risk_payload
     from portmetrics.metrics.tax_allowance import tax_allowance_payload
+    from portmetrics.paperless.mapping import get_paperless_settings
     from portmetrics.settings.portfolio import get_portfolio_settings
     from portmetrics.sync.accounts import list_accounts
 
@@ -555,18 +556,27 @@ def overview_payload(
 
     accounts_summary: list[dict] = []
     if account_id is None:
+        hidden = set(get_paperless_settings(session).get("hidden_account_ids") or [])
         for acc in list_accounts(session):
+            if acc["id"] in hidden:
+                continue
             scoped = load_activities(session, account_id=acc["id"])
             acc_nav = nav_as_of(scoped, prices, end) if scoped else ZERO
             c_in, c_out = (
                 cashflows_between(scoped, scoped[0].trade_date, end) if scoped else (ZERO, ZERO)
             )
+            returns = irr_payload(scoped, prices, as_of=end) if scoped else {
+                "irr": None,
+                "simple_return": None,
+            }
             accounts_summary.append(
                 {
                     "id": acc["id"],
                     "name": acc["name"],
                     "nav": str(acc_nav),
                     "invested": str(c_in - c_out),
+                    "irr": returns.get("irr"),
+                    "simple_return": returns.get("simple_return"),
                 }
             )
 
