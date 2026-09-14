@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   cmpScalar,
   money,
+  parsePortfolioHash,
   parseSettingsHash,
   pct,
   pctPoints,
+  portfolioHash,
   qty,
   ratio,
   sameIdNameList,
@@ -13,6 +15,44 @@ import {
   sortRows,
   toggleSort,
 } from "./uiUtils";
+
+describe("parsePortfolioHash / portfolioHash", () => {
+  it("parses overview, depot and position routes", () => {
+    expect(parsePortfolioHash("#/")).toEqual({
+      kind: "overview",
+      accountId: null,
+      positionIsin: null,
+    });
+    expect(parsePortfolioHash("#/depot/acc-1")).toEqual({
+      kind: "depot",
+      accountId: "acc-1",
+      positionIsin: null,
+    });
+    expect(parsePortfolioHash("#/depot/acc-1/position/IE00")).toEqual({
+      kind: "position",
+      accountId: "acc-1",
+      positionIsin: "IE00",
+    });
+    expect(parsePortfolioHash("#/position/IE00")).toEqual({
+      kind: "position",
+      accountId: null,
+      positionIsin: "IE00",
+    });
+  });
+
+  it("ignores settings hashes", () => {
+    expect(parsePortfolioHash("#settings/ops")).toBeNull();
+  });
+
+  it("round-trips portfolioHash", () => {
+    const depot = {
+      kind: "depot" as const,
+      accountId: "a2522c6f-0a3f-40dc-b2b5-57414fbc1814",
+      positionIsin: null,
+    };
+    expect(parsePortfolioHash(portfolioHash(depot))).toEqual(depot);
+  });
+});
 
 describe("parseSettingsHash / settingsHash", () => {
   it("parses known sections", () => {

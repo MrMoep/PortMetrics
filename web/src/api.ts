@@ -1,5 +1,15 @@
 export type Overview = {
   as_of: string;
+  scope?: {
+    account_id: string | null;
+    account_name: string;
+  } | null;
+  accounts_summary?: Array<{
+    id: string;
+    name: string;
+    nav: string;
+    invested: string;
+  }>;
   nav: string;
   invested: string;
   unrealized_gain: string;
@@ -78,6 +88,8 @@ export type Overview = {
 export type Lot = {
   id: number;
   isin: string;
+  account_id?: string | null;
+  account_name?: string | null;
   symbol?: string | null;
   wkn?: string | null;
   isin_code?: string | null;
@@ -90,6 +102,17 @@ export type Lot = {
   mark_price: string | null;
   unrealized_gain: string | null;
   unrealized_gain_pct: string | null;
+};
+
+export type Account = {
+  id: string;
+  name: string;
+  currency: string;
+  balance: string;
+  comment: string | null;
+  platform_id: string | null;
+  platform_name: string | null;
+  synced_at: string | null;
 };
 
 export type StagingMapping = {
@@ -285,8 +308,21 @@ async function stagingSyncStream(
 
 export const api = {
   version: () => request<VersionInfo>("/api/version"),
-  overview: () => request<Overview>("/api/metrics/overview"),
-  lots: () => request<{ lots: Lot[] }>("/api/lots"),
+  overview: (accountId?: string | null) => {
+    const q =
+      accountId != null && accountId !== ""
+        ? `?account_id=${encodeURIComponent(accountId)}`
+        : "";
+    return request<Overview>(`/api/metrics/overview${q}`);
+  },
+  accounts: () => request<{ count: number; accounts: Account[] }>("/api/accounts"),
+  lots: (params?: { isin?: string; account_id?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.isin) sp.set("isin", params.isin);
+    if (params?.account_id) sp.set("account_id", params.account_id);
+    const q = sp.toString();
+    return request<{ lots: Lot[] }>(`/api/lots${q ? `?${q}` : ""}`);
+  },
   sync: () =>
     request<{
       fetched: number;
@@ -407,6 +443,7 @@ export const api = {
     quantity: string;
     unit_price?: string;
     fee?: string;
+    account_id?: string;
   }) =>
     request<Record<string, unknown>>("/api/simulate/sell", {
       method: "POST",

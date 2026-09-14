@@ -27,6 +27,60 @@ export function settingsHash(section: SettingsSection): string {
   return `#settings/${section}`;
 }
 
+/** Depot / position deep-link: #/, #/depot/:id, #/depot/:id/position/:isin, #/position/:isin */
+export type PortfolioRoute =
+  | { kind: "overview"; accountId: null; positionIsin: null }
+  | { kind: "depot"; accountId: string; positionIsin: null }
+  | { kind: "position"; accountId: string | null; positionIsin: string };
+
+export function parsePortfolioHash(hash: string): PortfolioRoute | null {
+  const raw = hash.replace(/^#/, "").replace(/^\//, "");
+  if (!raw || raw === "overview") {
+    return { kind: "overview", accountId: null, positionIsin: null };
+  }
+  if (raw.startsWith("settings/")) return null;
+
+  const depotPos = raw.match(/^depot\/([^/]+)\/position\/([^/]+)$/i);
+  if (depotPos) {
+    return {
+      kind: "position",
+      accountId: decodeURIComponent(depotPos[1]),
+      positionIsin: decodeURIComponent(depotPos[2]),
+    };
+  }
+  const depot = raw.match(/^depot\/([^/]+)$/i);
+  if (depot) {
+    return {
+      kind: "depot",
+      accountId: decodeURIComponent(depot[1]),
+      positionIsin: null,
+    };
+  }
+  const pos = raw.match(/^position\/([^/]+)$/i);
+  if (pos) {
+    return {
+      kind: "position",
+      accountId: null,
+      positionIsin: decodeURIComponent(pos[1]),
+    };
+  }
+  return null;
+}
+
+export function portfolioHash(route: PortfolioRoute): string {
+  if (route.kind === "overview") return "#/";
+  if (route.kind === "depot" && route.accountId) {
+    return `#/depot/${encodeURIComponent(route.accountId)}`;
+  }
+  if (route.kind === "position" && route.positionIsin) {
+    if (route.accountId) {
+      return `#/depot/${encodeURIComponent(route.accountId)}/position/${encodeURIComponent(route.positionIsin)}`;
+    }
+    return `#/position/${encodeURIComponent(route.positionIsin)}`;
+  }
+  return "#/";
+}
+
 export function sameIdNameList(a: IdName[], b: IdName[]): boolean {
   if (a.length !== b.length) return false;
   const ids = new Set(a.map((row) => row.id));
