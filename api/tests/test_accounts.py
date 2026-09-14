@@ -51,7 +51,12 @@ def test_list_accounts_client() -> None:
         if request.url.path.endswith("/account"):
             return httpx.Response(
                 200,
-                json={"accounts": [sample_account_payload(), sample_account_payload(id="acc-2", name="Nürnberger")]},
+                json={
+                    "accounts": [
+                        sample_account_payload(),
+                        sample_account_payload(id="acc-2", name="Nürnberger"),
+                    ]
+                },
             )
         raise AssertionError(request.url.path)
 
