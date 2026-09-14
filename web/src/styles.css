@@ -231,22 +231,35 @@ select {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: color-mix(in srgb, var(--bg) 55%, transparent);
-  backdrop-filter: blur(2px);
+  background: color-mix(in srgb, var(--steel) 55%, transparent);
+}
+
+.modal-backdrop-confirm {
+  z-index: 50;
 }
 
 .modal-panel {
   width: min(420px, 100%);
   padding: 18px 18px 14px;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 12px 40px color-mix(in srgb, #000 45%, transparent);
+  box-shadow: var(--shadow);
 }
 
 .modal-panel h3 {
   margin: 0 0 8px;
   font-size: 1.05rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.confirm-message {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
 .icon-btn {
@@ -377,6 +390,7 @@ button.linkish:hover {
 
 .actions button,
 .primary,
+.danger,
 .row-actions button,
 .settings-actions button,
 .ops-row button {
@@ -407,6 +421,7 @@ button.linkish:hover {
 .nav button:focus-visible,
 .actions button:focus-visible,
 .primary:focus-visible,
+.danger:focus-visible,
 .row-actions button:focus-visible,
 .settings-actions button:focus-visible,
 .ops-row button:focus-visible {
@@ -429,11 +444,46 @@ button.linkish:hover {
   box-shadow: var(--shadow);
 }
 
-.primary:hover {
+.primary:hover,
+.row-actions .primary:hover {
   background: var(--ink);
   border-color: var(--ink);
   color: var(--panel);
   box-shadow: 4px 4px 0 var(--accent);
+}
+
+.row-actions .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow);
+}
+
+.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: var(--shadow);
+}
+
+.danger:hover,
+.row-actions .danger:hover {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--panel);
+  box-shadow: 4px 4px 0 var(--danger);
+}
+
+.row-actions .danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: var(--shadow);
+}
+
+.danger:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
 }
 
 .topbar .actions .primary {
