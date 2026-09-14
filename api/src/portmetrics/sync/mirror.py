@@ -10,6 +10,7 @@ from portmetrics.config import settings
 from portmetrics.fifo.service import RebuildResult, rebuild_lots
 from portmetrics.ghostfolio.client import GhostfolioClient
 from portmetrics.metrics.periods import rebuild_metrics_daily
+from portmetrics.sync.accounts import AccountSyncResult, sync_ghostfolio_accounts
 from portmetrics.sync.activities import SyncResult, sync_ghostfolio_activities
 from portmetrics.sync.prices import PriceSyncResult, sync_ghostfolio_prices
 
@@ -17,6 +18,7 @@ from portmetrics.sync.prices import PriceSyncResult, sync_ghostfolio_prices
 @dataclass(frozen=True)
 class MirrorSyncResult:
     activities: SyncResult
+    accounts: AccountSyncResult
     prices: PriceSyncResult
     fifo: RebuildResult
     metrics_days: int
@@ -31,6 +33,7 @@ def sync_ghostfolio_mirror(
     default_data_source: str | None = None,
 ) -> MirrorSyncResult:
     """Pull Ghostfolio state into PostgreSQL and rebuild derived tables."""
+    accounts = sync_ghostfolio_accounts(session, client)
     activities = sync_ghostfolio_activities(session, client)
     if include_prices:
         prices = sync_ghostfolio_prices(
@@ -53,6 +56,7 @@ def sync_ghostfolio_mirror(
     metrics_days = rebuild_metrics_daily(session)
     return MirrorSyncResult(
         activities=activities,
+        accounts=accounts,
         prices=prices,
         fifo=fifo,
         metrics_days=metrics_days,

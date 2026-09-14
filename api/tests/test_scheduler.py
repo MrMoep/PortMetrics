@@ -71,6 +71,11 @@ def test_job_sync_happy_path(monkeypatch) -> None:
         deleted = 0
         prune_skipped = False
 
+    class DummyAccounts:
+        fetched = 2
+        upserted = 2
+        deleted = 0
+
     class DummyFifo:
         lots_created = 1
 
@@ -91,6 +96,10 @@ def test_job_sync_happy_path(monkeypatch) -> None:
         upserted = 10
         skipped = 0
 
+    monkeypatch.setattr(
+        "portmetrics.scheduler.sync_ghostfolio_accounts",
+        lambda *_a, **_k: DummyAccounts(),
+    )
     monkeypatch.setattr(
         "portmetrics.scheduler.sync_ghostfolio_activities",
         lambda *_a, **_k: DummyResult(),

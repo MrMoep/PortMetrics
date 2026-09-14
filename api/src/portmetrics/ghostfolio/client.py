@@ -44,6 +44,33 @@ class GhostfolioActivity(BaseModel):
         return cls.model_validate(payload)
 
 
+class GhostfolioAccount(BaseModel):
+    """Ghostfolio account (Konto / Depot) from GET /api/v1/account."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    currency: str = "EUR"
+    balance: Decimal = Decimal("0")
+    comment: str | None = None
+    platform_id: str | None = Field(default=None, alias="platformId")
+    platform_name: str | None = None
+
+    @classmethod
+    def from_api(cls, raw: dict[str, Any]) -> GhostfolioAccount:
+        platform = raw.get("platform") or {}
+        platform_name = None
+        if isinstance(platform, dict):
+            platform_name = platform.get("name")
+        return cls.model_validate(
+            {
+                **raw,
+                "platform_name": platform_name,
+            }
+        )
+
+
 class GhostfolioSymbolData(BaseModel):
     """Symbol quote + optional daily history from GET /api/v1/symbol/:ds/:symbol."""
 
@@ -102,6 +129,20 @@ class GhostfolioClient:
             self.authenticate()
         assert self._jwt is not None
         return {"Authorization": f"Bearer {self._jwt}"}
+
+    def list_accounts(self) -> list[GhostfolioAccount]:
+        with self._client() as client:
+            headers = self._auth_headers()
+            response = client.get("/api/v1/account", headers=headers)
+            if response.status_code >= 400:
+                raise GhostfolioError(
+                    f"Ghostfolio accounts failed ({response.status_code}): {response.text}"
+                )
+            payload = response.json()
+            raw_accounts = payload.get("accounts") or []
+            if isinstance(payload, list):
+                raw_accounts = payload
+            return [GhostfolioAccount.from_api(item) for item in raw_accounts]
 
     def list_activities(self) -> list[GhostfolioActivity]:
         with self._client() as client:

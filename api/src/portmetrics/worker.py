@@ -10,6 +10,7 @@ from portmetrics.db.session import get_engine, session_scope
 from portmetrics.fifo.engine import FifoError
 from portmetrics.fifo.service import rebuild_lots
 from portmetrics.ghostfolio.client import GhostfolioClient, GhostfolioError
+from portmetrics.sync.accounts import sync_ghostfolio_accounts
 from portmetrics.sync.activities import sync_ghostfolio_activities
 from portmetrics.sync.prices import sync_ghostfolio_prices
 
@@ -22,6 +23,7 @@ def cmd_sync_ghostfolio() -> int:
     client = GhostfolioClient(settings.ghostfolio_url, settings.ghostfolio_access_token)
     try:
         with session_scope(engine) as session:
+            accounts = sync_ghostfolio_accounts(session, client)
             result = sync_ghostfolio_activities(session, client)
             prices = sync_ghostfolio_prices(
                 session,
@@ -37,7 +39,8 @@ def cmd_sync_ghostfolio() -> int:
         print(f"fifo rebuild failed: {exc}", file=sys.stderr)
         return 1
     print(
-        f"synced ghostfolio activities: fetched={result.fetched} "
+        f"synced ghostfolio: accounts={accounts.upserted}/{accounts.fetched} "
+        f"activities fetched={result.fetched} "
         f"upserted={result.upserted} deleted={result.deleted} "
         f"prune_skipped={result.prune_skipped} checksum={result.checksum} "
         f"prices={prices.upserted}/{prices.assets} "

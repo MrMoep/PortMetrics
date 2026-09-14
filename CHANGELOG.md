@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Features
+- Ghostfolio-**Account-Sync**: Konten (Depots) werden gespiegelt (`accounts`); `GET /api/accounts`; Teil des Mirror-/Scheduler-/Worker-Syncs
 - Overview: Kennzahlen ein-/ausblenden, sortieren und Hero wählen (persistiert unter `app_settings.overview`); Panel-Link „Anpassen“ (#77)
 - Kennungs-Tabelle ISIN/WKN/preferred Symbol (Einstellungen → Assets); Paperless-Confirm blockiert ohne Mapping; Historien-Vorschlag + Staging-Deep-Link (#57)
 - Ghostfolio-Sync **Orphan-Prune**: lokal fehlende GF-Activities werden entfernt; Staging `imported` → `pending`; Statuszeile zeigt gelöschte Anzahl

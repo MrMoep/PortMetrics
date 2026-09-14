@@ -70,6 +70,7 @@ from portmetrics.paperless.staging import (
 from portmetrics.scheduler import start_scheduler, stop_scheduler
 from portmetrics.settings.overview import get_overview_settings, save_overview_settings
 from portmetrics.settings.portfolio import get_portfolio_settings, save_portfolio_settings
+from portmetrics.sync.accounts import GHOSTFOLIO_ACCOUNTS_SOURCE, list_accounts
 from portmetrics.sync.activities import GHOSTFOLIO_SOURCE
 from portmetrics.sync.mirror import sync_ghostfolio_mirror
 from portmetrics.sync.prices import GHOSTFOLIO_PRICES_SOURCE, price_snapshot_count
@@ -149,6 +150,9 @@ def api_version() -> dict[str, str]:
 def sync_status(db: Session = Depends(get_db)) -> dict:
     state = db.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_SOURCE))
     price_state = db.scalar(select(SyncState).where(SyncState.source == GHOSTFOLIO_PRICES_SOURCE))
+    account_state = db.scalar(
+        select(SyncState).where(SyncState.source == GHOSTFOLIO_ACCOUNTS_SOURCE)
+    )
     activity_count = db.scalar(select(func.count()).select_from(Activity)) or 0
     return {
         "source": GHOSTFOLIO_SOURCE,
@@ -165,7 +169,21 @@ def sync_status(db: Session = Depends(get_db)) -> dict:
             ),
             "meta": price_state.meta if price_state else None,
         },
+        "accounts": {
+            "last_sync_at": (
+                account_state.last_sync_at.isoformat()
+                if account_state and account_state.last_sync_at
+                else None
+            ),
+            "meta": account_state.meta if account_state else None,
+        },
     }
+
+
+@app.get("/api/accounts")
+def get_accounts(db: Session = Depends(get_db)) -> dict:
+    accounts = list_accounts(db)
+    return {"count": len(accounts), "accounts": accounts}
 
 
 @app.post("/api/sync/ghostfolio")
@@ -183,6 +201,7 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
     except FifoError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     result = mirror.activities
+    accounts = mirror.accounts
     prices = mirror.prices
     fifo = mirror.fifo
     return {
@@ -191,6 +210,9 @@ def sync_ghostfolio(db: Session = Depends(get_db)) -> dict:
         "deleted": result.deleted,
         "prune_skipped": result.prune_skipped,
         "checksum": result.checksum,
+        "accounts_fetched": accounts.fetched,
+        "accounts_upserted": accounts.upserted,
+        "accounts_deleted": accounts.deleted,
         "price_assets": prices.assets,
         "price_upserted": prices.upserted,
         "price_skipped": prices.skipped,
