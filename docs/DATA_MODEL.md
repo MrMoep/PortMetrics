@@ -68,6 +68,7 @@ Verkauf → verbrauchte Lots.
 | Tabelle | Zweck |
 |---------|-------|
 | `accounts` | Gespiegelte Ghostfolio-Konten (`GET /api/v1/account`): id, Name, Währung, Balance, Platform |
+| `depot_transfers` | Interne Depotüberträge (nicht aus Ghostfolio); FIFO wandert Lots mit Einstand/Kaufdatum |
 | `price_snapshots` | Tageskurse aus Ghostfolio (`GET /api/v1/symbol/:ds/:symbol?includeHistoricalData=…`); `isin`-Spalte = Asset-Key (ISIN oder Symbol, wie FIFO/NAV) |
 | `metrics_daily` | Vorberechnete KPIs (nav, invested, mtd_return, ytd_return, …) |
 | `document_links` | Paperless-Dokument ↔ Activity/Lot |
@@ -101,4 +102,4 @@ Portfolio-KPIs (NAV, YTD, …) aggregieren weiterhin über alle Accounts; nur Lo
 
 ## Edge Cases (v1: manuell)
 
-Teil-Verkäufe, Stock Splits, Depotüberträge, Währungswechsel und Thesaurierer werden in v1 über manuelle Korrektur-Activities abgebildet. Automatische Erkennung ist Future-Scope.
+Teil-Verkäufe, Stock Splits, Währungswechsel und Thesaurierer werden in v1 über manuelle Korrektur-Activities abgebildet. **Depotüberträge** laufen intern über `depot_transfers` (Lot-Migration mit Einstand und Kaufdatum, kein realisierter Gewinn) — nicht als Ghostfolio SELL+BUY.

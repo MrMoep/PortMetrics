@@ -46,6 +46,7 @@ def test_alembic_upgrade_creates_schema(database_url: str, monkeypatch: pytest.M
         "app_settings",
         "asset_identifiers",
         "accounts",
+        "depot_transfers",
     }.issubset(tables)
 
     with engine.begin() as conn:

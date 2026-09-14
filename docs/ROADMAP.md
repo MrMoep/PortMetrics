@@ -42,6 +42,7 @@ Alle v1-Phasen und die Single-Container-Infrastruktur sind umgesetzt.
 | [#77](https://github.com/MrMoep/PortMetrics/issues/77) | Overview: Kennzahlen auswählbar und sortierbar | P1 | ✅ |
 | — | Ghostfolio Account-Sync (Depot-Namen) | P2 | ✅ |
 | [#67](https://github.com/MrMoep/PortMetrics/issues/67) | Account-scoped FIFO (Depot-Trennung) | P2 | ✅ |
+| — | Interne Depotüberträge (Lot-Migration) | P2 | ✅ |
 
 ## Future / nach 0.2
 

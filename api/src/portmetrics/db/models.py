@@ -254,6 +254,34 @@ class StagingImport(Base):
     )
 
 
+class DepotTransfer(Base):
+    """Internal depot transfer (not mirrored from Ghostfolio)."""
+
+    __tablename__ = "depot_transfers"
+    __table_args__ = (
+        CheckConstraint(
+            "from_account_id <> to_account_id",
+            name="ck_depot_transfers_distinct_accounts",
+        ),
+        CheckConstraint("quantity > 0", name="ck_depot_transfers_qty_positive"),
+        Index("ix_depot_transfers_date", "transfer_date"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    from_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    to_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    isin: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 8), nullable=False)
+    transfer_date: Mapped[date] = mapped_column(Date, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
     __table_args__ = (

@@ -10,6 +10,7 @@ Basis-URL im Container: `http://host:8080`
 | `GET` | `/api/sync/status` | Ghostfolio-Sync-Stand (Activities, Prices, Accounts) |
 | `POST` | `/api/sync/ghostfolio` | Sync Accounts + Activities + Orphan-Prune + FIFO + Metrics |
 | `GET` | `/api/accounts` | Gespiegelte Ghostfolio-Konten (Depots) |
+| `GET`/`POST`/`DELETE` | `/api/transfers` | Interne Depotüberträge (FIFO-Lot-Migration ohne realisierten Gewinn) |
 | `POST` | `/api/fifo/rebuild` | FIFO neu berechnen |
 | `GET` | `/api/lots` | Offene Lots (`?isin=` / `?account_id=`) |
 | `POST` | `/api/simulate/sell` | What-If Verkauf (`account_id` bei multi-Depot nötig) |

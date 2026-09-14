@@ -154,6 +154,97 @@ def apply_sell(
     return result
 
 
+@dataclass
+class TransferMove:
+    source_lot_activity_id: int
+    source_open_date: date
+    qty: Decimal
+    cost_basis: Decimal
+    unit_cost: Decimal
+    source_lot_id: int | None = None
+
+
+@dataclass
+class TransferResult:
+    moves: list[TransferMove] = field(default_factory=list)
+    new_lots: list[LotState] = field(default_factory=list)
+
+
+def apply_transfer(
+    lots: list[LotState],
+    *,
+    asset_key: str,
+    quantity: Decimal,
+    from_account_id: str | None,
+    to_account_id: str | None,
+    transfer_date: date | None = None,
+) -> TransferResult:
+    """Move quantity FIFO from one account to another without realized gain."""
+    remaining = Decimal(quantity)
+    if remaining <= 0:
+        raise FifoError("Transfer quantity must be positive")
+
+    src = normalize_account_id(from_account_id)
+    dst = normalize_account_id(to_account_id)
+    if src == dst:
+        raise FifoError("Transfer requires distinct source and destination accounts")
+
+    result = TransferResult()
+    eligible = sorted(
+        (
+            lot
+            for lot in lots
+            if lot.asset_key == asset_key and lot.account_id == src and lot.open_qty > 0
+        ),
+        key=lambda lot: (lot.open_date, lot.activity_id),
+    )
+
+    for lot in eligible:
+        if remaining <= 0:
+            break
+        take = min(remaining, lot.open_qty)
+        unit_cost = lot.unit_cost
+        cost = take * unit_cost
+        result.moves.append(
+            TransferMove(
+                source_lot_activity_id=lot.activity_id,
+                source_lot_id=lot.id,
+                source_open_date=lot.open_date,
+                qty=take,
+                cost_basis=cost,
+                unit_cost=unit_cost,
+            )
+        )
+        lot.open_qty -= take
+        if lot.open_qty == 0:
+            lot.status = "CLOSED"
+            lot.closed_at = transfer_date
+        else:
+            lot.status = "PARTIAL"
+            lot.closed_at = None
+
+        dest = LotState(
+            activity_id=lot.activity_id,
+            asset_key=asset_key,
+            open_qty=take,
+            original_qty=take,
+            cost_basis=cost,
+            open_date=lot.open_date,
+            account_id=dst,
+            status="OPEN",
+        )
+        result.new_lots.append(dest)
+        lots.append(dest)
+        remaining -= take
+
+    if remaining > 0:
+        raise FifoError(
+            f"Insufficient open lots for transfer of {asset_key} from {src}: "
+            f"short by {remaining}"
+        )
+    return result
+
+
 def estimate_tax(realized_gain: Decimal, tax_rate: Decimal) -> Decimal:
     if realized_gain <= 0:
         return Decimal("0")
