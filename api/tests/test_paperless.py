@@ -24,6 +24,7 @@ from portmetrics.paperless.staging import (
     build_staging_payload,
     confirm_staging,
     list_staging,
+    currency_warning,
     parse_monetary,
     reject_staging,
     sync_paperless_documents,
@@ -145,6 +146,16 @@ def test_parse_monetary() -> None:
     assert parse_monetary("EUR100.50") == (__import__("decimal").Decimal("100.50"), "EUR")
     assert parse_monetary("CHF42.00")[1] == "CHF"
     assert parse_monetary("12,5")[0] == __import__("decimal").Decimal("12.5")
+
+
+def test_currency_warning_only_for_non_eur() -> None:
+    assert currency_warning({"currency": "USD"})["currency"] == "USD"
+    assert currency_warning({"currency": "chf"})["currency"] == "CHF"
+    assert currency_warning({"currency": "EUR"}) is None
+    assert currency_warning({"currency": "eur"}) is None
+    assert currency_warning({}) is None
+    assert currency_warning({"currency": ""}) is None
+    assert currency_warning({"currency": None}) is None
 
 
 def test_build_staging_payload_legacy_names() -> None:
@@ -586,6 +597,53 @@ def test_confirm_missing_raises(db_session) -> None:
     ghostfolio = GhostfolioClient("http://ghostfolio.test", "tok", transport=bad)
     with pytest.raises(LookupError):
         confirm_staging(db_session, 99999, ghostfolio)
+
+
+def _mapped_staging_row(db_session, *, currency: str | None, doc_id: int) -> StagingImport:
+    from portmetrics.assets.identifiers import upsert_mapping
+
+    payload = build_staging_payload(_doc(doc_id), extract_custom_fields(_doc(doc_id), FIELD_MAP))
+    if currency is None:
+        payload.pop("currency", None)
+    else:
+        payload["currency"] = currency
+    row = StagingImport(paperless_doc_id=doc_id, payload=payload, status=STATUS_PENDING)
+    db_session.add(row)
+    upsert_mapping(
+        db_session,
+        isin="IE00BK5BQT80",
+        wkn="A1JX52",
+        preferred_symbol="VWCE.DE",
+    )
+    db_session.flush()
+    return row
+
+
+def test_staging_blocks_non_eur_currency(db_session) -> None:
+    row = _mapped_staging_row(db_session, currency="USD", doc_id=201)
+    items = list_staging(db_session)
+    assert len(items) == 1
+    assert items[0]["can_confirm"] is False
+    assert items[0]["currency_warning"]["currency"] == "USD"
+    assert "ohne FX" in items[0]["currency_warning"]["message"]
+
+    ghostfolio = GhostfolioClient(
+        "http://ghostfolio.test",
+        "tok",
+        transport=httpx.MockTransport(lambda _r: httpx.Response(500)),
+    )
+    with pytest.raises(ValueError, match="Währung USD"):
+        confirm_staging(db_session, row.id, ghostfolio)
+
+
+def test_staging_allows_eur_and_missing_currency(db_session) -> None:
+    eur = _mapped_staging_row(db_session, currency="EUR", doc_id=202)
+    missing = _mapped_staging_row(db_session, currency=None, doc_id=203)
+    items = {item["paperless_doc_id"]: item for item in list_staging(db_session)}
+    assert items[eur.paperless_doc_id]["can_confirm"] is True
+    assert items[eur.paperless_doc_id]["currency_warning"] is None
+    assert items[missing.paperless_doc_id]["can_confirm"] is True
+    assert items[missing.paperless_doc_id]["currency_warning"] is None
 
 
 def test_relink_staging_document_after_sync(db_session) -> None:
