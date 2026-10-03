@@ -154,6 +154,10 @@ export type StagingItem = {
   gf_activity_id: string | null;
   error: string | null;
   mapping?: StagingMapping;
+  currency_warning?: {
+    currency: string;
+    message: string;
+  } | null;
   can_confirm?: boolean;
 };
 

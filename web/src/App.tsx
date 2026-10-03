@@ -1916,6 +1916,11 @@ export default function App() {
                       : mapping?.preferred_symbol
                         ? `Import: ${mapping.preferred_symbol}`
                         : null;
+                  const currencyHint = item.currency_warning?.message ?? null;
+                  const currencyCode = item.payload.currency?.trim().toUpperCase();
+                  const priceLabel = `${money(item.payload.unit_price, showMode)}${
+                    currencyCode ? ` ${currencyCode}` : ""
+                  }`;
                   return (
                   <tr key={item.id}>
                     <td className="mono">{item.id}</td>
@@ -1957,9 +1962,10 @@ export default function App() {
                         )}
                       </div>
                       {mappingHint ? <p className="muted">{mappingHint}</p> : null}
+                      {currencyHint ? <p className="muted">{currencyHint}</p> : null}
                     </td>
                     <td className="mono">{qty(item.payload.quantity, showMode)}</td>
-                    <td className="mono">{money(item.payload.unit_price, showMode)}</td>
+                    <td className="mono">{priceLabel}</td>
                     <td className="mono">{item.payload.trade_date ?? "—"}</td>
                     <td className="row-actions">
                       {mapping?.needs_mapping && mapping.suggested_symbol ? (
@@ -1982,7 +1988,9 @@ export default function App() {
                               ? mapping.wkn_conflict.message
                               : mapping?.needs_mapping
                                 ? "Preferred Symbol fehlt — Kennungs-Tabelle pflegen"
-                                : undefined
+                                : currencyHint
+                                  ? currencyHint
+                                  : undefined
                         }
                         onClick={() =>
                           void runAction(`Confirm #${item.id}`, () => api.stagingConfirm(item.id))

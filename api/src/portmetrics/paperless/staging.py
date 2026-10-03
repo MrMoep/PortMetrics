@@ -52,6 +52,7 @@ STATUS_ERROR = "error"
 IMPORTABLE_TYPES = frozenset({"BUY", "SELL", "DIVIDEND", "FEE", "INTEREST"})
 STAGING_TYPES = IMPORTABLE_TYPES | {"OTHER"}
 TYPES_WITHOUT_QTY = frozenset({"FEE", "INTEREST", "OTHER"})
+BASE_CURRENCY = "EUR"
 
 _MONETARY_PREFIX = re.compile(
     r"^([A-Za-z]{3})\s*([+-]?\d+(?:[.,]\d+)?)\s*$"
@@ -165,6 +166,31 @@ def document_trade_date(document: dict[str, Any]) -> date:
     if not raw:
         raise ValueError("Document missing created date")
     return _as_date(raw)
+
+
+def _non_eur_currency(payload: dict[str, Any]) -> str | None:
+    """Return a 3-letter currency code when set and not EUR; else None."""
+    raw = payload.get("currency")
+    if raw is None or str(raw).strip() == "":
+        return None
+    code = str(raw).strip().upper()[:3]
+    if not code or code == BASE_CURRENCY:
+        return None
+    return code
+
+
+def currency_warning(payload: dict[str, Any]) -> dict[str, str] | None:
+    """UI/API hint when staging currency would mix into EUR aggregates."""
+    code = _non_eur_currency(payload)
+    if code is None:
+        return None
+    return {
+        "currency": code,
+        "message": (
+            f"Währung {code} — PortMetrics rechnet ohne FX; "
+            "in Paperless Kurs/Entgelte auf EUR setzen und erneut syncen."
+        ),
+    }
 
 
 def build_staging_payload(
@@ -485,11 +511,13 @@ def _serialize_staging(session: Session, row: StagingImport) -> dict[str, Any]:
     payload.setdefault("importable", wp_typ in IMPORTABLE_TYPES)
     mapping = staging_mapping_status(session, payload)
     importable = bool(payload.get("importable"))
+    warning = currency_warning(payload)
     can_confirm = (
         importable
         and row.status not in {STATUS_IMPORTED, STATUS_REJECTED}
         and (not mapping["needs_mapping"])
         and mapping["wkn_conflict"] is None
+        and warning is None
     )
     return {
         "id": row.id,
@@ -501,6 +529,7 @@ def _serialize_staging(session: Session, row: StagingImport) -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "mapping": mapping,
+        "currency_warning": warning,
         "can_confirm": can_confirm,
     }
 
@@ -532,6 +561,9 @@ def confirm_staging(
     paperless_settings = get_paperless_settings(session)
     payload = dict(row.payload or {})
     upsert_from_payload(session, payload)
+    warning = currency_warning(payload)
+    if warning is not None:
+        raise ValueError(warning["message"])
     wp_typ = str(payload.get("wp_typ") or "").upper()
     if wp_typ not in IMPORTABLE_TYPES:
         raise ValueError(
