@@ -13,6 +13,13 @@ class GhostfolioError(RuntimeError):
     pass
 
 
+def _first_nonempty(*values: Any) -> Any:
+    for value in values:
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
 class GhostfolioActivity(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -32,12 +39,25 @@ class GhostfolioActivity(BaseModel):
 
     @classmethod
     def from_api(cls, raw: dict[str, Any]) -> GhostfolioActivity:
-        profile = raw.get("SymbolProfile") or raw.get("symbolProfile") or {}
+        profiles = [
+            p
+            for p in (
+                raw.get("SymbolProfile"),
+                raw.get("symbolProfile"),
+                raw.get("assetProfile"),
+                raw.get("AssetProfile"),
+            )
+            if isinstance(p, dict)
+        ]
         payload = {
             **raw,
-            "symbol": profile.get("symbol") or raw.get("symbol"),
-            "isin": profile.get("isin") or raw.get("isin"),
-            "dataSource": profile.get("dataSource") or raw.get("dataSource"),
+            "symbol": _first_nonempty(
+                *(p.get("symbol") for p in profiles), raw.get("symbol")
+            ),
+            "isin": _first_nonempty(*(p.get("isin") for p in profiles), raw.get("isin")),
+            "dataSource": _first_nonempty(
+                *(p.get("dataSource") for p in profiles), raw.get("dataSource")
+            ),
         }
         if not payload.get("symbol"):
             raise GhostfolioError(f"Activity {raw.get('id')} missing symbol")
