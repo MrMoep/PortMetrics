@@ -39,6 +39,52 @@ def test_ghostfolio_activity_requires_symbol() -> None:
         )
 
 
+def test_ghostfolio_activity_from_asset_profile() -> None:
+    activity = GhostfolioActivity.from_api(
+        {
+            "id": str(UUID(int=2)),
+            "accountId": "acc-1",
+            "currency": "EUR",
+            "date": "2022-10-03T22:00:00.000Z",
+            "fee": 1.48,
+            "quantity": 1.031,
+            "type": "BUY",
+            "unitPrice": 95.54,
+            "assetProfile": {
+                "symbol": "VGWL.DE",
+                "isin": None,
+                "dataSource": "YAHOO",
+            },
+        }
+    )
+    assert activity.symbol == "VGWL.DE"
+    assert activity.isin is None
+    assert activity.data_source == "YAHOO"
+
+
+def test_ghostfolio_activity_coalesces_empty_symbol_profile() -> None:
+    activity = GhostfolioActivity.from_api(
+        {
+            "id": str(UUID(int=3)),
+            "accountId": "acc-1",
+            "currency": "EUR",
+            "date": "2024-01-01T00:00:00Z",
+            "quantity": 1,
+            "type": "BUY",
+            "unitPrice": 1,
+            "SymbolProfile": {"symbol": None, "isin": None, "dataSource": None},
+            "assetProfile": {
+                "symbol": "VGWL.DE",
+                "isin": "IE00BK5BQT80",
+                "dataSource": "YAHOO",
+            },
+        }
+    )
+    assert activity.symbol == "VGWL.DE"
+    assert activity.isin == "IE00BK5BQT80"
+    assert activity.data_source == "YAHOO"
+
+
 def test_ghostfolio_activity_allows_null_account_id(sample_activity_payload: dict) -> None:
     sample_activity_payload["accountId"] = None
     activity = GhostfolioActivity.from_api(sample_activity_payload)
