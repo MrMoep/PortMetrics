@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class GhostfolioError(RuntimeError):
@@ -58,10 +58,18 @@ class GhostfolioActivity(BaseModel):
             "dataSource": _first_nonempty(
                 *(p.get("dataSource") for p in profiles), raw.get("dataSource")
             ),
+            "currency": _first_nonempty(
+                raw.get("currency"),
+                *(p.get("currency") for p in profiles),
+                "EUR",
+            ),
         }
         if not payload.get("symbol"):
             raise GhostfolioError(f"Activity {raw.get('id')} missing symbol")
-        return cls.model_validate(payload)
+        try:
+            return cls.model_validate(payload)
+        except ValidationError as exc:
+            raise GhostfolioError(f"Activity {raw.get('id')} invalid: {exc}") from exc
 
 
 class GhostfolioAccount(BaseModel):

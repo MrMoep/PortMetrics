@@ -60,6 +60,44 @@ def test_ghostfolio_activity_from_asset_profile() -> None:
     assert activity.symbol == "VGWL.DE"
     assert activity.isin is None
     assert activity.data_source == "YAHOO"
+    assert activity.currency == "EUR"
+
+
+def test_ghostfolio_activity_coalesces_null_currency_from_asset_profile() -> None:
+    activity = GhostfolioActivity.from_api(
+        {
+            "id": str(UUID(int=4)),
+            "accountId": "acc-1",
+            "currency": None,
+            "date": "2022-10-03T22:00:00.000Z",
+            "quantity": 1.031,
+            "type": "BUY",
+            "unitPrice": 95.54,
+            "assetProfile": {
+                "symbol": "VGWL.DE",
+                "currency": "EUR",
+                "dataSource": "YAHOO",
+            },
+        }
+    )
+    assert activity.symbol == "VGWL.DE"
+    assert activity.currency == "EUR"
+
+
+def test_ghostfolio_activity_currency_falls_back_to_eur() -> None:
+    activity = GhostfolioActivity.from_api(
+        {
+            "id": str(UUID(int=5)),
+            "accountId": "acc-1",
+            "currency": None,
+            "date": "2024-01-01T00:00:00Z",
+            "quantity": 1,
+            "type": "BUY",
+            "unitPrice": 1,
+            "assetProfile": {"symbol": "VGWL.DE", "currency": None},
+        }
+    )
+    assert activity.currency == "EUR"
 
 
 def test_ghostfolio_activity_coalesces_empty_symbol_profile() -> None:
